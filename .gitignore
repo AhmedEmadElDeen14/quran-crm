@@ -1,14 +1,39 @@
-# Ignore Node.js modules
-node_modules/
+# Ignore Node.js modules for the backend
+/node_modules/
 
-# Ignore build output for React app
+# Ignore .env files
+.env
+
+# Ignore build output for the backend (if any)
+/build/
+/dist/
+
+# Ignore client-side specific files
+client/node_modules/
 client/build/
 client/dist/
-client/node_modules/
+client/.env
 
-# Ignore other common React/Node.js files
-.env
-.DS_Store
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# OS generated files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Misc
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace

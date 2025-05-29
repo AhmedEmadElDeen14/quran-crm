@@ -1,64 +1,40 @@
-// models/accounting.js
+// quran-crm/models/accounting.js
 
 const mongoose = require('mongoose');
 
-const paymentRecordSchema = new mongoose.Schema({
-    studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true }, // الطالب الذي دفع
-    amount: { type: Number, required: true }, // مبلغ الدفعة
-    date: { type: Date, required: true, default: Date.now }, // تاريخ الدفع
-    subscriptionType: { type: String, required: true }, // نوع الاشتراك المرتبط بالدفعة
-    description: { type: String, default: '' }, // ملاحظات إضافية (اختياري)
-    paymentMethod: { type: String, default: 'غير محدد' }, // طريقة الدفع مثل نقدي، تحويل، ...
-    status: { type: String, enum: ['مدفوع', 'غير مدفوع', 'مدفوع جزئيًا'], default: 'مدفوع' }
-}, { _id: false });
-
-const subscriptionSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    price: { type: Number, required: true },
-    totalHours: { type: Number, required: true },
-    specialOffer: {
-        isActive: { type: Boolean, default: false },
-        description: { type: String, default: '' },
-        discountedPricePerStudent: { type: Number },
-        minStudents: { type: Number },
-        totalPriceForAllStudents: { type: Number }
-    }
-}, { _id: false });
-
-const expenseSchema = new mongoose.Schema({
-    type: { type: String, required: true },
-    amount: { type: Number, required: true },
-    paymentDate: { type: Date, required: true },
-    description: { type: String, default: '' }
-}, { _id: false });
-
-const salaryDetailSchema = new mongoose.Schema({
-    teacherId: { type: mongoose.Schema.Types.ObjectId, ref: 'Teacher', required: true },
-    hoursTaught: { type: Number, required: true },
-    allowedAbsences: { type: Number, default: 1 },
-    extraAbsences: { type: Number, default: 0 },
-    salaryCalculated: { type: Number, required: true },
-    paymentStatus: { type: String, enum: ['مدفوع', 'غير مدفوع', 'مدفوع جزئيًا'], default: 'غير مدفوع' }
-}, { _id: false });
-
 const accountingSchema = new mongoose.Schema({
-    month: { type: String, required: true },
-    subscriptions: [subscriptionSchema],
-    studentsCountBySubscription: {
-        type: Map,
-        of: Number,
-        default: {}
+    month: { // لتمثيل الشهر، مثلاً "2025-05" لسهولة الاستعلام والفرز
+        type: String,
+        required: true,
+        unique: true // لضمان وجود سجل محاسبة واحد لكل شهر
     },
-    payments: [paymentRecordSchema],  // <-- تسجيل كل دفعة مالية منفصلة
-    expenses: [expenseSchema],
-    salaries: [salaryDetailSchema],
-    supervisorSalary: { type: Number, default: 0 },
-    totalRevenue: { type: Number, default: 0 },
-    totalExpenses: { type: Number, default: 0 },
-    charityAmount: { type: Number, default: 0 },
-    netProfit: { type: Number, default: 0 },
-    createdAt: { type: Date, default: Date.now }
-});
+    // هذه الحقول ستُحسب وتُخزن كملخصات شهرية من نموذج Transaction
+    // سيتم تحديثها دورياً بواسطة Cron Job لتعكس البيانات الشاملة للشهر
+    totalRevenue: {
+        type: Number,
+        default: 0
+    },
+    totalExpenses: {
+        type: Number,
+        default: 0
+    },
+    totalSalariesPaid: { // إجمالي الرواتب المدفوعة في هذا الشهر
+        type: Number,
+        default: 0
+    },
+    charityAmount: { // 5% من الإيرادات كما هو محدد في الملخص
+        type: Number,
+        default: 0
+    },
+    netProfit: {
+        type: Number,
+        default: 0
+    },
+    // يمكن إضافة ملخصات أخرى هنا إذا لزم الأمر، مثل:
+    // studentsCountBySubscription: { type: Map, of: Number, default: {} },
+    // trialConversionsCount: { type: Number, default: 0 },
+    // detailedBreakdown: { type: Object, default: {} } // لتخزين تفصيلات أكثر إن لزم الأمر
+}, { timestamps: true });
 
 const Accounting = mongoose.model('Accounting', accountingSchema);
 

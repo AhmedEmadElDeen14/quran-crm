@@ -7,6 +7,7 @@ const Teacher = require('../models/teacher');
 const Session = require('../models/session');
 const mongoose = require('mongoose');
 const { protect, admin, teacher, adminOrTeacher } = require('../middleware/authMiddleware'); // <--- إضافة هذا الاستيراد
+const Transaction = require('../models/transaction');
 
 
 // تعريف قيم الاشتراك لكل باقة وعدد الخانات (30 دقيقة) المطلوبة شهرياً
@@ -136,6 +137,20 @@ router.post('/', protect, admin, async (req, res) => {
         });
 
         const savedStudent = await newStudent.save();
+
+        // إذا كانت هناك تفاصيل دفع، قم بإنشاء حركة مالية (Transaction)
+        if (savedStudent.paymentDetails && savedStudent.paymentDetails.amount > 0 && savedStudent.paymentDetails.status !== 'حلقة تجريبية') {
+            const newTransaction = new Transaction({
+                entityType: 'Student',
+                entityId: savedStudent._id,
+                amount: savedStudent.paymentDetails.amount,
+                type: 'subscription_payment',
+                description: `دفعة تسجيل اشتراك جديد للطالب <span class="math-inline">\{savedStudent\.name\} \(</span>{savedStudent.subscriptionType})`,
+                date: savedStudent.paymentDetails.date || new Date(),
+                status: savedStudent.paymentDetails.status
+            });
+            await newTransaction.save();
+        }
 
         if (scheduledAppointments && scheduledAppointments.length > 0 && teacher) {
             for (const appt of scheduledAppointments) {
@@ -364,6 +379,27 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
         }
 
         if (action === 'subscribe') {
+            student.paymentDetails = {
+                status: paymentDetails?.status || 'مدفوع',
+                amount: newSubDetails.amount,
+                date: paymentDetails?.date ? new Date(paymentDetails.date) : new Date() // تأكد من وجود حقل التاريخ
+            };
+            // ... (باقي تحديثات الطالب)
+
+            // إنشاء حركة مالية (Transaction) للاشتراك الجديد
+            if (student.paymentDetails.amount > 0) {
+                const newTransaction = new Transaction({
+                    entityType: 'Student',
+                    entityId: student._id,
+                    amount: student.paymentDetails.amount,
+                    type: 'subscription_payment',
+                    description: `دفعة تحويل من تجريبي إلى اشتراك كامل للطالب <span class="math-inline">\{student\.name\} \(</span>{student.subscriptionType})`,
+                    date: student.paymentDetails.date,
+                    status: student.paymentDetails.status
+                });
+                await newTransaction.save();
+            }
+
             const newSubDetails = SUBSCRIPTION_DETAILS[newSubscriptionType] || SUBSCRIPTION_DETAILS['أخرى'];
             student.subscriptionType = newSubscriptionType;
             student.paymentDetails = {
@@ -445,49 +481,51 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
     }
 });
 
-// @route   POST /api/students/:id/renew
-// @desc    تأكيد تجديد الطالب
-// @access  Admin
+// POST /api/students/:id/renew - تأكيد تجديد الطالب كـ Transaction
 router.post('/:id/renew', protect, admin, async (req, res) => {
+    const { paymentAmount, paymentStatus, paymentDate, description } = req.body; // يمكن استقبال تفاصيل الدفعة
+
     try {
         const student = await Student.findById(req.params.id);
         if (!student) {
             return res.status(404).json({ message: 'الطالب غير موجود.' });
         }
 
-        student.lastRenewalDate = new Date();
+        // تحديث بيانات الطالب للتجديد
+        student.lastRenewalDate = paymentDate ? new Date(paymentDate) : new Date();
         student.sessionsCompletedThisPeriod = 0;
         student.isRenewalNeeded = false;
 
-        const SUBSCRIPTION_PRICES = {
-            'نصف ساعة / 4 حصص': 170,
-            'نصف ساعة / 8 حصص': 300,
-            'ساعة / 4 حصص': 300,
-            'ساعة / 8 حصص': 600,
-            'مخصص': 0,
-            'حلقة تجريبية': 0,
-            'أخرى': 0
-        };
-
-        student.paymentDetails.amount = SUBSCRIPTION_PRICES[student.subscriptionType] || 0;
-        student.paymentDetails.status = 'تم الدفع';
+        // تحديث paymentDetails في نموذج الطالب مباشرةً
+        student.paymentDetails.status = paymentStatus || 'تم الدفع';
+        student.paymentDetails.amount = paymentAmount || (SUBSCRIPTION_PRICES[student.subscriptionType] || 0);
+        student.paymentDetails.date = student.lastRenewalDate; // تاريخ آخر دفعة
 
         await student.save();
-        res.json({ message: 'تم تجديد اشتراك الطالب بنجاح!', student });
 
+        // إنشاء حركة مالية (Transaction) للتجديد
+        const newTransaction = new Transaction({
+            entityType: 'Student',
+            entityId: student._id,
+            amount: student.paymentDetails.amount,
+            type: 'subscription_payment',
+            description: description || `تجديد اشتراك الطالب <span class="math-inline">\{student\.name\} \(</span>{student.subscriptionType})`,
+            date: student.lastRenewalDate,
+            status: student.paymentDetails.status
+        });
+        await newTransaction.save();
+
+        res.json({ message: 'تم تجديد اشتراك الطالب بنجاح!', student, transaction: newTransaction });
     } catch (err) {
         console.error('خطأ في تجديد الطالب:', err);
-        res.status(500).json({ message: err.message });
+        res.status(500).json({ message: 'فشل في تجديد الطالب: ' + err.message });
     }
 });
 
 
-// إضافة دفعة مالية جديدة للطالب
-// @route   POST /api/students/:id/payments
-// @desc    إضافة دفعة مالية منفصلة للطالب
-// @access  Admin
+// POST /api/students/:id/payments - إضافة دفعة مالية منفصلة للطالب كـ Transaction
 router.post('/:id/payments', protect, admin, async (req, res) => {
-    const { amount, date, description, status } = req.body;
+    const { amount, date, description, status, subscriptionType } = req.body; // أضف subscriptionType
 
     try {
         const student = await Student.findById(req.params.id);
@@ -495,28 +533,34 @@ router.post('/:id/payments', protect, admin, async (req, res) => {
             return res.status(404).json({ message: 'الطالب غير موجود.' });
         }
 
-        // إنشاء سجل دفعة جديد
-        const newPayment = {
+        // إنشاء حركة مالية جديدة (Transaction)
+        const newTransaction = new Transaction({
+            entityType: 'Student',
+            entityId: student._id,
             amount,
+            type: 'subscription_payment', // يمكنك تحديد نوع الدفعة هنا بدقة
+            description: description || `دفعة اشتراك للطالب ${student.name}`,
             date: date ? new Date(date) : new Date(),
-            description: description || '',
-            status: status || 'مدفوع'
-        };
+            status: status || 'paid'
+        });
 
-        // إضافة الدفعة للمصفوفة
-        student.payments.push(newPayment);
+        const savedTransaction = await newTransaction.save();
 
-        // تحديث القيمة الإجمالية للاشتراك في financialDetails
-        student.financialDetails.totalSubscriptionPrice += amount;
-
+        // تحديث paymentDetails في نموذج الطالب مباشرةً بآخر حالة دفع
+        student.paymentDetails.status = savedTransaction.status;
+        student.paymentDetails.amount = savedTransaction.amount;
+        student.paymentDetails.date = savedTransaction.date;
+        // يمكنك أيضاً تحديث lastRenewalDate هنا إذا كانت هذه الدفعة تجديداً كاملاً
+        // student.lastRenewalDate = savedTransaction.date;
+        // student.sessionsCompletedThisPeriod = 0;
+        // student.isRenewalNeeded = false;
         await student.save();
-        res.status(201).json({ message: 'تمت إضافة الدفعة المالية بنجاح.', payment: newPayment, student });
+
+        res.status(201).json({ message: 'تمت إضافة الدفعة المالية بنجاح.', transaction: savedTransaction });
     } catch (err) {
-        console.error('خطأ في إضافة الدفعة المالية:', err);
-        res.status(500).json({ message: err.message });
+        console.error('خطأ في إضافة الدفعة المالية للطالب:', err);
+        res.status(500).json({ message: 'فشل في إضافة الدفعة المالية.' });
     }
 });
-
-
 
 module.exports = router;

@@ -11,6 +11,8 @@ const teacherRoutes = require('./routes/teacherRoutes');
 const authRoutes = require('./routes/authRoutes');
 const { startRenewalChecker } = require('./cron/renewalChecker');
 const financialRoutes = require('./routes/financialRoutes');
+const financialManagementRoutes = require('./routes/financialManagementRoutes'); // استيراد المسار الجديد
+
 
 // تحميل متغيرات البيئة من ملف .env
 dotenv.config();
@@ -37,7 +39,7 @@ mongoose.connect(process.env.MONGO_URI, {
 app.use('/api/auth', authRoutes);
 app.use('/api/students', studentRoutes);
 app.use('/api/teachers', teacherRoutes);
-app.use('/api/financial', financialRoutes);
+app.use('/api/finance', financialManagementRoutes);
 
 // المسار الأساسي
 app.get('/', (req, res) => {

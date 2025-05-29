@@ -6,6 +6,7 @@ const Teacher = require('../models/teacher');
 const Student = require('../models/student');
 const Session = require('../models/session');
 const { protect, admin, teacher, adminOrTeacher } = require('../middleware/authMiddleware');
+const Transaction = require('../models/transaction');
 
 // تعريف عدد الخانات (30 دقيقة) لكل باقة للتجديد أو الحساب
 const SUBSCRIPTION_SLOTS_MAP = {
@@ -264,53 +265,48 @@ router.get('/:id/students-details', protect, admin, async (req, res) => {
 });
 
 
+// دالة لتحديث الملخص الشهري المالي للمعلم (يمكن استدعاؤها من Cron Job أو API)
 const updateTeacherMonthlySummary = async (teacherId) => {
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
 
     // احصائيات الحصص الشهرية
-    const completedSessions = await Session.countDocuments({
+    const completedSessions = await Session.countDocuments({ //
         teacherId,
         status: { $in: ['حضَر', 'غاب'] },
         date: { $gte: startOfMonth, $lte: endOfMonth }
     });
 
-    const missedSessions = await Session.countDocuments({
-        teacherId,
-        status: 'غاب',
-        date: { $gte: startOfMonth, $lte: endOfMonth }
-    });
+    // حساب الأجر بناءً على الحصص المكتملة
+    const hourlyRate = 40; // هذا يجب أن يكون من إعدادات النظام أو من حقل في موديل المعلم
+    const calculatedSalary = completedSessions * 0.5 * hourlyRate; // 0.5 لأن الحصة نصف ساعة
 
-    // الحساب المبدئي للإيرادات: (كل حصة 30 دقيقة = 20 جنيه)
-    const totalEarnings = completedSessions * 20;
-
-    // جلب بيانات المعلم لتحديث financialDetails
-    const teacher = await Teacher.findById(teacherId);
+    const teacher = await Teacher.findById(teacherId); //
     if (teacher) {
-        // تحديث الملخص الشهري المالي
-        teacher.financialDetails.monthlyRevenues = totalEarnings;
-        // تحديث المصروفات الافتراضية (يمكنك تعديلها لاحقًا)
-        teacher.financialDetails.monthlyExpenses = teacher.financialDetails.monthlyExpenses || 0;
-        // المرتب: كمثال يعتمد على عدد الحصص * 40 جنيه/ساعة (كل حصة نصف ساعة = 0.5 ساعة)
-        teacher.financialDetails.salary = completedSessions * 0.5 * 40;
+        // هنا يمكن تخزين الملخص في monthlySummary كـ Array إذا أردت تاريخاً
+        // ولكن الأفضل أن يتم تسجيل دفعة الراتب كـ Transaction مستقلة
+        // وجمع الإيرادات والمصروفات من Transactions عند إنشاء تقرير AccountingSummary
 
-        // المكافآت والخصومات يمكن تعديلها يدوياً أو بناءً على قواعد أخرى
-        teacher.financialDetails.extraPayments = teacher.financialDetails.extraPayments || 0;
-        teacher.financialDetails.deductions = teacher.financialDetails.deductions || 0;
-
-        // حساب صافي الراتب
-        teacher.financialDetails.netSalary = teacher.financialDetails.salary + teacher.financialDetails.extraPayments - teacher.financialDetails.deductions;
-
-        teacher.financialDetails.lastPaymentDate = new Date();
-
-        // إضافة سجل دفعة جديدة تلقائيًا في paymentRecords (اختياري حسب التطبيق)
-        teacher.financialDetails.paymentRecords.push({
-            amount: teacher.financialDetails.netSalary,
+        // مثال: إنشاء Transaction لراتب المعلم (يمكن أن يتم ذلك بواسطة Cron Job لرواتب جماعية)
+        // يجب أن تحدد سياسة دفع الرواتب (يومي، أسبوعي، شهري)
+        /*
+        // هذا المنطق يجب أن يكون في Cron Job أو API منفصل لدفع الرواتب الشهرية
+        // وليس هنا عند كل طلب لوحة التحكم.
+        const salaryTransaction = new Transaction({
+            entityType: 'Teacher',
+            entityId: teacher._id,
+            amount: calculatedSalary,
+            type: 'salary_payment',
+            description: `راتب شهر ${startOfMonth.toLocaleString('default', { month: 'long', year: 'numeric' })} للمعلم ${teacher.name}`,
             date: new Date(),
-            description: `راتب شهر ${new Date().toLocaleString('default', { month: 'long' })}`,
-            status: 'مدفوع'
+            status: 'pending' // أو 'paid' لو تم الدفع تلقائياً
         });
+        await salaryTransaction.save();
+        */
 
+        // تحديث تاريخ آخر دفعة راتب في المعلم
+        // إذا كنت ستعتمد على Transaction بالكامل، فيمكن جلب آخر تاريخ دفعة من Transactions
+        teacher.financialDetails.lastPaymentDate = new Date(); // تحديث هذا التاريخ هنا ليعكس تاريخ تحديث الملخص
         await teacher.save();
     }
 };
@@ -430,53 +426,76 @@ router.get('/:id', protect, adminOrTeacher, async (req, res) => {
 // دالة لتحديث الملخص الشهري المالي للمعلم
 
 // تحديث الملخص عند طلب الملخص الشهري
+// GET /api/teachers/:id/dashboard-summary - ملخص أداء المعلم الشهري
 router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) => {
     if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
         return res.status(403).json({ message: 'غير مصرح لك بمشاهدة لوحة تحكم هذا المعلم.' });
     }
     try {
         const teacherId = req.params.id;
+        const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
+        const currentMonthString = `<span class="math-inline">\{new Date\(\)\.getFullYear\(\)\}\-</span>{String(new Date().getMonth() + 1).padStart(2, '0')}`;
 
-        // تحديث الملخص المالي قبل الإرجاع (يمكن تحسين الأداء بجعله مجدول وليس عند كل طلب)
-        await updateTeacherMonthlySummary(teacherId);
+        // جلب الملخص المحاسبي للشهر الحالي من AccountingSummary
+        const accountingSummary = await AccountingSummary.findOne({ month: currentMonthString });
 
-        // جلب بيانات المعلم بعد التحديث
-        const teacher = await Teacher.findById(teacherId).select('financialDetails');
+        // جلب إجمالي الرواتب المدفوعة لهذا المعلم في الشهر الحالي من Transactions
+        const teacherSalaryTransactions = await Transaction.find({
+            entityType: 'Teacher',
+            entityId: teacherId,
+            type: 'salary_payment',
+            date: { $gte: startOfMonth, $lte: endOfMonth },
+            status: { $in: ['paid', 'partial'] }
+        });
+        const totalSalaryPaidToTeacherThisMonth = teacherSalaryTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+        // جلب إجمالي الإيرادات المرتبطة بهذا المعلم من حصص الطلاب في الشهر الحالي
+        const studentSubscriptionTransactions = await Transaction.find({
+            entityType: 'Student',
+            // لا يمكن الربط بـ teacherId هنا مباشرة في Transaction لأنه يخص الطالب
+            // بدلاً من ذلك، ستحتاج إلى جلب الحصص وتحديد الإيرادات منها أو تجميعها من نموذج AccountingSummary
+            type: 'subscription_payment',
+            date: { $gte: startOfMonth, $lte: endOfMonth },
+            status: { $in: ['paid', 'partial'] }
+        }).populate('entityId', 'teacherId'); // لجلب teacherId من الطالب المرتبط
+
+        let totalRevenueFromStudentsOfThisTeacher = 0;
+        studentSubscriptionTransactions.forEach(t => {
+            if (t.entityId && t.entityId.teacherId && t.entityId.teacherId.toString() === teacherId) {
+                // هذا الحساب معقد هنا، الأفضل أن يتم في Cron Job لـ AccountingSummary.
+                // يمكن أن يكون teacherEarningsFromStudent حقلًا محسوبًا في Student.financialDetails
+                // أو يتم تجميعه من Sessions.
+            }
+        });
 
         // باقي البيانات التقليدية في الملخص (مثل عدد الطلاب، الحصص المكتملة)
         const activeSubscribedStudentsCount = await Student.countDocuments({
-            teacherId,
+            teacherId: teacherId, //
             isArchived: false,
             subscriptionType: { $nin: ['حلقة تجريبية', 'أخرى'] }
         });
 
         const convertedStudentsCount = await Student.countDocuments({
-            teacherId,
+            teacherId: teacherId, //
             trialStatus: 'تم التحويل للاشتراك',
         });
 
-        const completedTrialSessionsTaught = await Session.countDocuments({
-            teacherId,
+        const completedTrialSessionsTaught = await Session.countDocuments({ //
+            teacherId: teacherId, //
             isTrial: true,
             status: { $in: ['حضَر', 'غاب'] },
-            date: {
-                $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-                $lte: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59)
-            }
+            date: { $gte: startOfMonth, $lte: endOfMonth }
         });
 
-        const completedMonthlySessions = await Session.countDocuments({
-            teacherId,
+        const completedMonthlySessions = await Session.countDocuments({ //
+            teacherId: teacherId, //
             status: { $in: ['حضَر', 'غاب'] },
-            date: {
-                $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-                $lte: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59)
-            }
+            date: { $gte: startOfMonth, $lte: endOfMonth }
         });
 
-        // عدد الحصص المجدولة في الأسبوع
         let weeklyScheduledSlots = 0;
-        const teacherSchedule = await Teacher.findById(teacherId).select('availableTimeSlots');
+        const teacherSchedule = await Teacher.findById(teacherId).select('availableTimeSlots'); //
         if (teacherSchedule) {
             teacherSchedule.availableTimeSlots.forEach(slot => {
                 if (slot.isBooked && slot.bookedBy) {
@@ -492,13 +511,15 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
             weeklyHoursScheduled,
             convertedStudentsCount,
             completedTrialSessionsTaught,
-            totalExpectedRevenueFromStudents: teacher.financialDetails.monthlyRevenues,
-            earningsBasedOnHours: teacher.financialDetails.salary,
-            monthlyExpenses: teacher.financialDetails.monthlyExpenses,
-            extraPayments: teacher.financialDetails.extraPayments,
-            deductions: teacher.financialDetails.deductions,
-            netSalary: teacher.financialDetails.netSalary,
-            lastPaymentDate: teacher.financialDetails.lastPaymentDate,
+            totalSalaryPaidToTeacherThisMonth,
+            // هذه الحقول يجب أن تأتي من AccountingSummary أو يتم حسابها من Transactions
+            // totalExpectedRevenueFromStudents: accountingSummary?.totalRevenue || 0,
+            // earningsBasedOnHours: totalSalaryPaidToTeacherThisMonth,
+            // monthlyExpenses: accountingSummary?.totalExpenses || 0, // مصروفات المعلم الشخصية
+            // extraPayments: 0, // يمكن أن تُضاف كـ Transactions منفصلة
+            // deductions: 0, // يمكن أن تُضاف كـ Transactions منفصلة
+            // netSalary: totalSalaryPaidToTeacherThisMonth,
+            lastPaymentDate: teacher.financialDetails?.lastPaymentDate || null, //
         });
 
     } catch (err) {

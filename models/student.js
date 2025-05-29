@@ -2,8 +2,6 @@
 
 const mongoose = require('mongoose');
 
-
-// <--- الإصلاح هنا: إزالة 'new' الزائدة
 const studentSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -56,16 +54,14 @@ const studentSchema = new mongoose.Schema({
         default: 'نصف ساعة'
     },
     paymentDetails: {
-        status: { type: String, enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'], default: 'لم يتم الدفع' }, // <--- تم إضافة 'مدفوع' هنا
-        amount: { type: Number, default: 0 }
+        status: { type: String, enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'], default: 'لم يتم الدفع' },
+        amount: { type: Number, default: 0 },
+        // تاريخ آخر دفعة يمكن أن يظل هنا أو يتم تحديثه من آخر Transaction
+        date: { type: Date, default: null } // إضافة حقل تاريخ الدفعة
     },
     sessionsCompletedThisPeriod: {
         type: Number,
         default: 0
-    },
-    lastRenewalDate: {
-        type: Date,
-        default: null
     },
     isRenewalNeeded: {
         type: Boolean,
@@ -99,25 +95,20 @@ const studentSchema = new mongoose.Schema({
         trim: true,
         default: null
     },
-    financialDetails: {
-        totalSubscriptionPrice: { type: Number, default: 0 }, // قيمة الاشتراك المدفوعة أو المتوقعة
-        totalHoursSubscribed: { type: Number, default: 0 }, // عدد الساعات المشترك فيها
-        attendedSessions: { type: Number, default: 0 }, // عدد الحصص التي حضرها الطالب فعلياً
-        allowedAbsences: { type: Number, default: 1 }, // عدد الحصص المسموح للغياب بدون خصم
-        extraAbsences: { type: Number, default: 0 }, // عدد الحصص التي تغيب عنها بعد الغياب المسموح
-        teacherEarningsFromStudent: { type: Number, default: 0 }, // مبلغ أجر المعلم من هذا الطالب (يحسب من حضور وغياب الحصص)
-        lastPaymentDate: { type: Date, default: null } // تاريخ آخر دفعة
+    financialDetails: { // يمكن تبسيط هذه الحقول لاحقاً أو إزالتها إذا تم احتسابها بالكامل من Transactions
+        allowedAbsences: { type: Number, default: 1 },
+        extraAbsences: { type: Number, default: 0 },
     },
-    payments: [],
+    // تم حذف مصفوفة payments هنا، لأنها ستكون في نموذج Transaction
 }, { timestamps: true });
 
-// دالة لتحديد عدد الخانات المطلوبة للباقة شهرياً (كنقطة مرجعية للتجديد)
+// دالة لتحديد عدد الخانات المطلوبة للباقة شهرياً
 studentSchema.methods.getRequiredMonthlySlots = function () {
     const type = this.subscriptionType;
     const duration = this.duration;
 
     let sessionsPerWeek = 0;
-    let durationPerSession = 30;
+    let durationPerSession = 30; // بوحدة الدقائق
 
     switch (type) {
         case 'نصف ساعة / 4 حصص': sessionsPerWeek = 1; durationPerSession = 30; break;
@@ -126,26 +117,17 @@ studentSchema.methods.getRequiredMonthlySlots = function () {
         case 'ساعة / 8 حصص': sessionsPerWeek = 2; durationPerSession = 60; break;
         case 'حلقة تجريبية':
         case 'مخصص':
-            sessionsPerWeek = (type === 'مخصص') ? 6 : 1;
+            sessionsPerWeek = (type === 'مخصص') ? 6 : 1; // الافتراضي 6 حصص للمخصص، 1 للتجريبية
             if (duration === 'نصف ساعة') durationPerSession = 30;
             else if (duration === 'ساعة') durationPerSession = 60;
             else if (duration === 'ساعة ونصف') durationPerSession = 90;
             else if (duration === 'ساعتين') durationPerSession = 120;
             break;
-        default: sessionsPerWeek = 0; durationPerSession = 30;
+        default: sessionsPerWeek = 0; durationPerSession = 30; // لـ 'أخرى'
     }
 
-    return sessionsPerWeek * (durationPerSession / 30) * 4;
+    return sessionsPerWeek * (durationPerSession / 30) * 4; // 4 أسابيع في الشهر تقريبا
 };
-
-
-// إضافة حقل جديد داخل studentSchema لتخزين المدفوعات المالية للطالب
-const paymentRecordSchema = new mongoose.Schema({
-    amount: { type: Number, required: true },
-    date: { type: Date, required: true, default: Date.now },
-    description: { type: String, default: '' },
-    status: { type: String, enum: ['مدفوع', 'غير مدفوع', 'مدفوع جزئيًا'], default: 'مدفوع' }
-}, { _id: false }); // عدم إنشاء _id فرعي لكل مدفوعه
 
 const Student = mongoose.model('Student', studentSchema);
 
