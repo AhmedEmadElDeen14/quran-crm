@@ -1,0 +1,14 @@
+# Ignore Node.js modules
+node_modules/
+
+# Ignore build output for React app
+client/build/
+client/dist/
+client/node_modules/
+
+# Ignore other common React/Node.js files
+.env
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

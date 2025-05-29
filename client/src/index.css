@@ -1,0 +1,438 @@
+/* client/src/index.css */
+
+/* استيراد خط Cairo */
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
+/* استيراد Google Icons */
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===============================
+   متغيرات CSS للألوان (Light + Dark)
+   =============================== */
+:root {
+  --color-primary: #4f46e5;
+  --color-secondary: #6366f1;
+  --color-accent: #f43f5e;
+  --color-neutral: #374151;
+  --color-base-100: #ffffff;
+  --color-info: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-on-primary: #ffffff;
+
+  --bg-card: #ffffff;
+  --border-card: #e5e7eb;
+}
+
+/* الوضع الداكن */
+.dark {
+  --color-primary: #a78bfa;
+  --color-secondary: #818cf8;
+  --color-accent: #fda4af;
+  --color-neutral: #d1d5db;
+  --color-base-100: #1f2937;
+  --color-info: #60a5fa;
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+  --color-error: #f87171;
+
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-on-primary: #000000;
+
+  --bg-card: #27272a;
+  --border-card: #374151;
+}
+
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-base-100);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ==========================================
+   أنماط قاعدة (Base Styles) - تُطبق عالمياً
+   ========================================== */
+@layer base {
+  body {
+    font-family: 'Cairo', sans-serif;
+    @apply bg-gray-50 text-gray-800 transition-colors duration-300;
+    background-color: var(--color-base-100);
+    color: var(--text-primary);
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  .dark body {
+  @apply bg-gray-900 text-gray-100;
+  background-color: var(--color-base-100);
+  color: var(--text-primary);
+}
+
+.page-layout {
+  background-color: var(--color-base-100) !important;
+  @apply p-8 rounded-lg shadow-xl mb-6 min-h-screen;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  transition: color 0.3s ease, background-color 0.3s ease;
+  min-height: 100vh;
+}
+
+
+.navbar {
+  background-color: var(--color-base-100);
+  transition: background-color 0.3s ease;
+}
+
+/* في الوضع الداكن */
+.dark .navbar {
+  background-color: var(--color-base-100); /* أو لون داكن مناسب */
+}
+
+
+.wrapper, .container {
+  background-color: transparent;
+}
+
+
+
+  /* توجيهات RTL أساسية */
+  html[dir="rtl"] {
+    direction: rtl;
+    text-align: right;
+  }
+
+  a {
+    color: var(--color-primary);
+    text-decoration: none;
+    transition: color 0.3s ease;
+  }
+  a:hover {
+    color: var(--color-secondary);
+  }
+}
+
+/* ==========================================
+   أنماط المكونات المخصصة (Custom Components)
+   ========================================== */
+@layer components {
+  /* الأزرار */
+  .btn {
+    @apply px-6 py-2 font-semibold transition-colors duration-300 transform rounded-lg;
+    min-width: 100px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    @apply focus:outline-none focus:ring focus:ring-opacity-80;
+  }
+  .btn-primary {
+    background-color: var(--color-primary);
+    color: var(--text-on-primary);
+    @apply shadow-md;
+  }
+  .btn-primary:hover {
+    background-color: var(--color-secondary);
+    @apply shadow-lg;
+  }
+  .btn-secondary {
+    background-color: var(--bg-card);
+    color: var(--color-neutral);
+    border: 1px solid var(--border-card);
+    @apply shadow-sm;
+  }
+  .btn-secondary:hover {
+    background-color: var(--color-base-100);
+    @apply shadow-md;
+  }
+  .btn-error {
+    background-color: var(--color-error);
+    color: var(--text-on-primary);
+    @apply shadow-md;
+  }
+  .btn-error:hover {
+    background-color: #dc2626; /* أغمق */
+  }
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--color-primary);
+  }
+
+  /* زر دائري */
+  .btn-circle {
+    @apply rounded-full flex items-center justify-center p-0;
+    width: theme('spacing.10');
+    height: theme('spacing.10');
+  }
+  .btn-circle.btn-sm {
+    width: theme('spacing.8');
+    height: theme('spacing.8');
+  }
+  .btn-circle.btn-lg {
+    width: theme('spacing.12');
+    height: theme('spacing.12');
+  }
+
+  /* أيقونات داخل الأزرار */
+  .button-icon {
+    @apply flex items-center justify-center;
+  }
+  .button-icon .material-icons {
+    @apply text-xl mr-2 rtl:mr-0 rtl:ml-2;
+  }
+
+  /* البطاقات */
+  .card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-card);
+    color: var(--text-primary);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  }
+
+  /* الحقول */
+  .form-group {
+    @apply mb-4;
+  }
+  .form-group label {
+    color: var(--color-neutral);
+    font-weight: 600;
+    display: block;
+    margin-bottom: 0.5rem;
+    transition: color 0.3s ease;
+  }
+  .form-input {
+    @apply block w-full px-3 py-2 rounded-md border shadow-sm text-base;
+    border-color: var(--border-card);
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    box-sizing: border-box;
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  }
+  .form-input::placeholder {
+    color: var(--color-neutral);
+    opacity: 0.6;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgb(79 70 229 / 0.4);
+  }
+
+  /* تحديد اتجاه النص RTL للنصوص داخل الفورم */
+  html[dir="rtl"] .form-input {
+    text-align: right;
+  }
+
+  /* القوائم المنسدلة */
+  .form-select {
+    @apply block w-full pl-3 pr-10 py-2 rounded-md border shadow-sm text-base;
+    border-color: var(--border-card);
+    background-color: var(--bg-card);
+    color: var(--text-primary);
+    background-image: url('data:image/svg+xml,%3csvg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"%3e%3cpath stroke="%236b7280" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 8l4 4 4-4"/%3e%3c/svg%3e');
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.5em 1.5em;
+    box-sizing: border-box;
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  }
+  html[dir="rtl"] .form-select {
+    background-position: left 0.75rem center;
+    padding-left: 2.5rem;
+    padding-right: 0.75rem;
+  }
+  .form-select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgb(79 70 229 / 0.4);
+  }
+
+  /* Textarea */
+  textarea {
+    @apply form-input;
+    min-height: 100px;
+  }
+
+  /* الجداول */
+  .data-table-container {
+    @apply overflow-x-auto rounded-lg shadow-md border;
+    border-color: var(--border-card);
+    transition: border-color 0.3s ease;
+  }
+  .data-table {
+    @apply w-full border-collapse bg-white text-sm;
+    min-width: 900px;
+  }
+  .data-table thead {
+    @apply bg-gray-50 text-gray-600 font-semibold uppercase;
+  }
+  .data-table th,
+  .data-table td {
+    @apply p-4 border-b border-gray-200 text-center;
+    border-color: var(--border-card);
+    vertical-align: middle;
+  }
+  .data-table tbody tr:nth-child(even) {
+    background-color: var(--bg-card);
+  }
+  .data-table tbody tr:hover {
+    background-color: var(--color-base-100);
+  }
+
+  /* Checkbox داخل الجداول */
+  .checkbox-col {
+    @apply w-12 text-center;
+  }
+  .form-checkbox {
+    @apply h-4 w-4 rounded border;
+    border-color: var(--border-card);
+    background-color: var(--bg-card);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+  }
+
+  /* أزرار الإجراءات */
+  .action-icon-button {
+    @apply btn btn-circle btn-sm bg-transparent border text-gray-500;
+    border-color: var(--border-card);
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  }
+  .action-icon-button:hover {
+    @apply bg-gray-100 text-indigo-600;
+  }
+  .action-icon-button.delete-icon-button:hover {
+    @apply text-red-600;
+  }
+
+  /* روابط */
+  .zoom-link-text {
+    color: var(--color-primary);
+    transition: color 0.3s ease;
+  }
+  .zoom-link-text:hover {
+    color: var(--color-secondary);
+  }
+
+  /* Pagination */
+  .pagination-footer {
+    @apply flex justify-between items-center px-6 py-4 border-t text-sm;
+    border-color: var(--border-card);
+    color: var(--text-secondary);
+    transition: color 0.3s ease, border-color 0.3s ease;
+  }
+  .pagination-footer .btn-secondary {
+    @apply px-3 py-1 text-sm;
+  }
+
+  /* دعم RTL */
+  html[dir="rtl"] .ml-auto {
+    margin-left: 0 !important;
+    margin-right: auto !important;
+  }
+  html[dir="rtl"] .mr-auto {
+    margin-right: 0 !important;
+    margin-left: auto !important;
+  }
+  html[dir="rtl"] .text-left {
+    text-align: right !important;
+  }
+  html[dir="rtl"] .text-right {
+    text-align: left !important;
+  }
+  html[dir="rtl"] .justify-start {
+    justify-content: flex-end !important;
+  }
+  html[dir="rtl"] .justify-end {
+    justify-content: flex-start !important;
+  }
+  html[dir="rtl"] .items-start {
+    align-items: flex-end !important;
+  }
+  html[dir="rtl"] .items-end {
+    align-items: flex-start !important;
+  }
+  html[dir="rtl"] .flex-row {
+    flex-direction: row-reverse !important;
+  }
+  html[dir="rtl"] .material-icons {
+    @apply ml-2 mr-0;
+  }
+  html[dir="rtl"] .button-icon .material-icons {
+    @apply ml-2 mr-0;
+  }
+  html[dir="rtl"] .form-input,
+  html[dir="rtl"] .form-select,
+  html[dir="rtl"] textarea {
+    @apply text-right;
+  }
+  html[dir="rtl"] .form-select {
+    @apply pl-3 pr-10;
+  }
+  html[dir="rtl"] .search-input-container .material-icons {
+    @apply left-auto right-3;
+  }
+  html[dir="rtl"] .search-input {
+    @apply pr-10 pl-3;
+  }
+  html[dir="rtl"] .data-table th,
+  html[dir="rtl"] .data-table td {
+    @apply text-right;
+  }
+  html[dir="rtl"] .data-table th .sort-icon {
+    @apply left-auto right-2;
+  }
+  html[dir="rtl"] .teacher-info-cell {
+    @apply flex-row-reverse justify-end;
+  }
+  html[dir="rtl"] .actions-cell {
+    @apply justify-start;
+  }
+  html[dir="rtl"] .action-icon-button {
+    @apply ml-2 mr-0;
+  }
+  html[dir="rtl"] .pagination-footer {
+    @apply flex-row-reverse;
+  }
+  html[dir="rtl"] .pagination-footer .btn-secondary {
+    @apply mr-0 ml-auto;
+  }
+  html[dir="rtl"] .pagination-footer .pagination-text {
+    @apply mr-auto ml-0;
+  }
+  html[dir="rtl"] .day-selection-buttons {
+    @apply flex-row-reverse;
+  }
+  html[dir="rtl"] .select-day-button .material-icons.check-icon {
+    @apply ml-0 mr-2;
+  }
+  html[dir="rtl"] .current-slots-summary .day-slots-group h4 {
+    @apply text-right;
+  }
+  html[dir="rtl"] .current-slots-summary .slots-for-day-grid {
+    @apply flex-row-reverse;
+  }
+  html[dir="rtl"] .slot-tag .booked-by-text {
+    @apply mr-1 ml-0;
+  }
+  html[dir="rtl"] .slot-tag .remove-slot-button {
+    @apply pr-2 pl-0;
+  }
+  html[dir="rtl"] .time-slot-chip .booked-by-text {
+    @apply mr-1 ml-0;
+  }
+}
