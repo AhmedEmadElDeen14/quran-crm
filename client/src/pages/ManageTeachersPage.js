@@ -235,6 +235,9 @@ function ManageTeachersPage() {
                 'عدد المواعيد المتاحة': counts.available,
                 'عدد المواعيد المحجوزة': counts.booked,
                 'عدد الطلاب': counts.studentCount,
+                'عدد الطلاب': counts.studentCount,
+                'حصص مكتملة هذا الشهر': t.currentMonthSessions || 0, // إضافة حقل جديد من المعلم
+                'تاريخ آخر دفعة راتب': t.financialDetails?.lastPaymentDate ? new Date(t.financialDetails.lastPaymentDate).toLocaleDateString('ar-EG') : 'لا يوجد', // إضافة تاريخ آخر دفعة
                 'الحالة': t.active !== false ? 'نشط' : 'غير نشط',
             };
         });
@@ -396,6 +399,13 @@ function ManageTeachersPage() {
                                 <th className="text-center text-gray-900 dark:text-gray-100">عدد المواعيد المحجوزة</th>
                                 <th className="text-center text-gray-900 dark:text-gray-100">عدد الطلاب</th>
                                 <th className="text-center text-gray-900 dark:text-gray-100">الحالة</th>
+                                <th onClick={() => handleSort('currentMonthSessions')} className="sortable text-gray-900 dark:text-gray-100 text-center">
+                                    حصص الشهر الحالي
+                                    {sortColumn === 'currentMonthSessions' && (
+                                        <span className="material-icons sort-icon">{sortDirection === 'asc' ? 'arrow_upward' : 'arrow_downward'}</span>
+                                    )}
+                                </th>
+                                <th className="text-center text-gray-900 dark:text-gray-100">الحالة</th>
                                 <th className="text-center text-gray-900 dark:text-gray-100">الإجراءات</th>
                             </tr>
                         </thead>
@@ -441,6 +451,8 @@ function ManageTeachersPage() {
                                             <td className="text-center">{counts.available}</td>
                                             <td className="text-center">{counts.booked}</td>
                                             <td className="text-center">{counts.studentCount}</td>
+                                            <td className="text-center">{teacher.currentMonthSessions || 0}</td>
+                                            <td className="text-center">{teacher.currentMonthSessions || 0}</td>
                                             <td className="text-center">{teacher.active !== false ? 'نشط' : 'غير نشط'}</td>
                                             <td className="actions-cell flex gap-1 justify-center">
                                                 <button onClick={() => handleViewDetails(teacher._id)} title="عرض التفاصيل" className="btn btn-sm btn-info">

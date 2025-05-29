@@ -46,17 +46,27 @@ function TeacherDashboard() {
     }, [user, id]);  // نضيف التبعيات هنا لضمان استدعاء useEffect بشكل صحيح
 
     useEffect(() => {
+        // لا حاجة لـ `totalEarnings` كـ state منفصل هنا، يمكن استخدامه مباشرة من `summary`
+        // const [totalEarnings, setTotalEarnings] = useState(0); // حذف هذا السطر
+        // ...
         const fetchSummary = async () => {
             try {
                 const res = await axios.get(`/api/teachers/${teacherId}/dashboard-summary`, {
                     headers: { Authorization: `Bearer ${user.token}` },
                 });
                 setSummary(res.data);
-                calculateEarnings(res.data.completedMonthlySessions);
+                // لا حاجة لـ `calculateEarnings` هنا، لأن الحساب يتم في الخلفية
+                // calculateEarnings(res.data.completedMonthlySessions); // حذف هذا السطر
             } catch (err) {
                 setError('فشل في جلب ملخص الأداء');
             }
         };
+        // دالة لحساب الأجر - لم نعد بحاجة إليها هنا، لأنها تُحسب في الخلفية
+        // const calculateEarnings = (completedSessions) => { // حذف هذه الدالة
+        //     const hourlyRate = 40;
+        //     const earnings = completedSessions * (hourlyRate / 2);
+        //     setTotalEarnings(earnings);
+        // };
 
         // دالة لحساب الأجر
         const calculateEarnings = (completedSessions) => {
@@ -202,7 +212,14 @@ function TeacherDashboard() {
                     </div>
                     <div className="bg-yellow-100 dark:bg-yellow-900 p-4 rounded-lg shadow">
                         <p className="text-yellow-700 dark:text-yellow-300 font-semibold">الإيرادات المتوقعة (جنيه)</p>
-                        <p className="text-3xl font-bold text-yellow-800 dark:text-yellow-400">{summary?.earningsBasedOnHours?.toFixed(2) ?? '0.00'}</p>
+                        <p className="text-3xl font-bold text-yellow-800 dark:text-yellow-400">{summary?.estimatedEarningsBasedOnSessions?.toFixed(2) ?? '0.00'}</p>
+                    </div>
+                    <div className="bg-purple-100 dark:bg-purple-900 p-4 rounded-lg shadow">
+                        <p className="text-purple-700 dark:text-purple-300 font-semibold">الراتب المدفوع هذا الشهر (جنيه)</p>
+                        <p className="text-3xl font-bold text-purple-800 dark:text-purple-400">{summary?.totalSalaryPaidToTeacherThisMonth?.toFixed(2) ?? '0.00'}</p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
+                            آخر دفعة: {summary?.lastPaymentDate ? new Date(summary.lastPaymentDate).toLocaleDateString('ar-EG') : 'لا يوجد'}
+                        </p>
                     </div>
                 </div>
             </section>

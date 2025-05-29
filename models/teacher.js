@@ -23,14 +23,6 @@ const teacherSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
-    monthlySummary: [{ // يمكن الاحتفاظ به كملخص تاريخي، أو إزالته والاعتماد على AccountingSummary
-        month: { type: String }, // مثل "يناير"، "فبراير"، إلخ
-        completedSessions: { type: Number, default: 0 },
-        missedSessions: { type: Number, default: 0 },
-        totalEarnings: { type: Number, default: 0 },
-        salaryLastMonth: { type: Number, default: 0 },
-        otherInfo: { type: String, default: '' },
-    }],
     currentMonthSessions: { type: Number, default: 0 },
     specialization: {
         type: String,
@@ -64,15 +56,8 @@ const teacherSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    financialDetails: { // هذه الحقول يمكن أن تصبح محسوبة من Transactions أو AccountingSummary
-        // monthlyRevenues: { type: Number, default: 0 }, // تم إزالته
-        // monthlyExpenses: { type: Number, default: 0 }, // تم إزالته
-        // salary: { type: Number, default: 0 }, // تم إزالته
-        // extraPayments: { type: Number, default: 0 }, // تم إزالته
-        // deductions: { type: Number, default: 0 }, // تم إزالته
-        // netSalary: { type: Number, default: 0 }, // تم إزالته
-        lastPaymentDate: { type: Date, default: null } // يمكن الاحتفاظ به لتتبع آخر راتب مدفوع
-        // تم حذف paymentRecords هنا، لأنها ستكون في نموذج Transaction
+    financialDetails: {
+        lastPaymentDate: { type: Date, default: null }
     },
 }, { timestamps: true });
 
