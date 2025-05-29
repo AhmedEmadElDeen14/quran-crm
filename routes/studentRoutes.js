@@ -404,8 +404,9 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
             student.subscriptionType = newSubscriptionType;
             student.paymentDetails = {
                 status: paymentDetails?.status || 'مدفوع',
-                amount: newSubDetails.amount
             };
+            student.paymentDetails.amount = paymentDetails?.amount || newSubDetails.amount; // <-- تم التعديل هنا: استخدم paymentDetails.amount من الـ req.body أولاً
+            student.paymentDetails.date = paymentDetails?.date ? new Date(paymentDetails.date) : new Date();
             student.trialStatus = 'تم التحويل للاشتراك';
             student.trialNotes = trialNotes || null;
             student.isArchived = false;

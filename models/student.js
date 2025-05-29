@@ -48,6 +48,10 @@ const studentSchema = new mongoose.Schema({
         ],
         default: 'حلقة تجريبية'
     },
+    isTrial: { // هل هي حصة تجريبية
+        type: Boolean,
+        default: false
+    },
     duration: {
         type: String,
         enum: ['نصف ساعة', 'ساعة', 'ساعة ونصف', 'ساعتين'],
@@ -56,8 +60,7 @@ const studentSchema = new mongoose.Schema({
     paymentDetails: {
         status: { type: String, enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'], default: 'لم يتم الدفع' },
         amount: { type: Number, default: 0 },
-        // تاريخ آخر دفعة يمكن أن يظل هنا أو يتم تحديثه من آخر Transaction
-        date: { type: Date, default: null } // إضافة حقل تاريخ الدفعة
+        date: { type: Date, default: null } // تاريخ آخر دفعة
     },
     sessionsCompletedThisPeriod: {
         type: Number,
@@ -95,11 +98,7 @@ const studentSchema = new mongoose.Schema({
         trim: true,
         default: null
     },
-    financialDetails: { // يمكن تبسيط هذه الحقول لاحقاً أو إزالتها إذا تم احتسابها بالكامل من Transactions
-        allowedAbsences: { type: Number, default: 1 },
-        extraAbsences: { type: Number, default: 0 },
-    },
-    // تم حذف مصفوفة payments هنا، لأنها ستكون في نموذج Transaction
+
 }, { timestamps: true });
 
 // دالة لتحديد عدد الخانات المطلوبة للباقة شهرياً
