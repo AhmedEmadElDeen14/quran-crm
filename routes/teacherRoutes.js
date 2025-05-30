@@ -2,6 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const Teacher = require('../models/teacher');
 const Student = require('../models/student');
 const Session = require('../models/session');
@@ -162,31 +163,32 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
     if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
         return res.status(403).json({ message: 'غير مصرح لك بمشاهدة لوحة تحكم هذا المعلم.' });
     }
+    const teacherId = req.params.id;
     try {
-        const teacherId = req.params.id;
+
         const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
         const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
 
         const activeSubscribedStudentsCount = await Student.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             isArchived: false,
             subscriptionType: { $nin: ['حلقة تجريبية', 'أخرى'] }
         });
 
         const convertedStudentsCount = await Student.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             trialStatus: 'تم التحويل للاشتراك',
         });
 
         const completedTrialSessionsTaught = await Session.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             isTrial: true,
             status: { $in: ['حضَر', 'غاب'] },
             date: { $gte: startOfMonth, $lte: endOfMonth }
         });
 
         const completedMonthlySessions = await Session.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             status: { $in: ['حضَر', 'غاب'] },
             date: { $gte: startOfMonth, $lte: endOfMonth }
         });
@@ -195,7 +197,7 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
 
         let totalExpectedRevenueFromStudents = 0;
         const studentsWithTeacher = await Student.find({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             isArchived: false,
             subscriptionType: { $nin: ['حلقة تجريبية', 'أخرى'] }
         }).select('paymentDetails.amount');
@@ -235,11 +237,18 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
 });
 
 // GET /api/teachers/:id/students-details - جلب تفاصيل الطلاب المشتركين (Admin فقط)
-router.get('/:id/students-details', protect, admin, async (req, res) => {
+router.get('/:id/students-details', protect, adminOrTeacher, async (req, res) => {
+    if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
+        return res.status(403).json({ message: 'غير مصرح لك بمشاهدة بيانات طلاب معلم آخر.' });
+    }
+
+    const teacherId = req.params.id;
     try {
-        const teacherId = req.params.id;
-        const students = await Student.find({ teacherId: teacherId, isArchived: false })
-            .select('name age subscriptionType paymentDetails.status sessionsCompletedThisPeriod isRenewalNeeded duration');
+        const students = await Student.find({
+            teacherId: new mongoose.Types.ObjectId(teacherId), // تأكد من تحويل teacherId إلى ObjectId
+            isArchived: false
+        })
+            .select('name age subscriptionType paymentDetails.status sessionsCompletedThisPeriod absencesThisPeriod isRenewalNeeded duration scheduledAppointments');
 
         const studentsDetails = students.map(student => {
             const requiredMonthlySlots = student.getRequiredMonthlySlots();
@@ -253,7 +262,8 @@ router.get('/:id/students-details', protect, admin, async (req, res) => {
                 sessionsCompleted: student.sessionsCompletedThisPeriod,
                 requiredSlots: requiredMonthlySlots,
                 remainingSlots: Math.max(0, remainingSlots),
-                isRenewalNeeded: student.isRenewalNeeded
+                isRenewalNeeded: student.isRenewalNeeded,
+                scheduledAppointments: student.scheduledAppointments || [],
             };
         });
 
@@ -265,6 +275,31 @@ router.get('/:id/students-details', protect, admin, async (req, res) => {
 });
 
 
+// GET /api/teachers/:id/sessions-reports - جلب تقارير حصص المعلم
+router.get('/:id/sessions-reports', protect, adminOrTeacher, async (req, res) => {
+    if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
+        return res.status(403).json({ message: 'غير مصرح لك بمشاهدة تقارير معلم آخر.' });
+    }
+    const teacherId = req.params.id; // هذا يأتي من req.params.id
+
+    try {
+
+        // جلب أحدث 100 تقرير حصة لهذا المعلم، أو يمكن إضافة فلترة بالشهر والسنة
+        const reports = await Session.find({
+            teacherId: new mongoose.Types.ObjectId(teacherId), // <--- استخدام new mongoose.Types.ObjectId
+            report: { $ne: null }, // فقط الحصص التي تحتوي على تقرير
+            status: 'حضَر' // عادة التقرير يكون للحصص التي حضرها الطالب
+        })
+            .populate('studentId', 'name') // جلب اسم الطالب
+            .sort({ date: -1 }) // الأحدث أولاً
+            .limit(100); // حد أقصى للتقارير المعروضة
+
+        res.json(reports);
+    } catch (err) {
+        console.error("Error fetching teacher's session reports:", err);
+        res.status(500).json({ message: 'فشل الخادم في جلب تقارير الحصص.' });
+    }
+});
 
 
 // GET /api/teachers/:id/daily-sessions-by-day?dayOfWeek=الأحد
@@ -272,21 +307,20 @@ router.get('/:id/daily-sessions-by-day', protect, adminOrTeacher, async (req, re
     if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
         return res.status(403).json({ message: 'غير مصرح لك بمشاهدة حصص هذا المعلم.' });
     }
-    // الأدمن يمكنه الوصول بدون شرط
 
-
-    const { dayOfWeek } = req.query;
+    const teacherId = req.params.id;
+    const { dayOfWeek } = req.query; // <--- فقط dayOfWeek
     if (!dayOfWeek) {
         return res.status(400).json({ message: 'معامل dayOfWeek مطلوب.' });
     }
 
     try {
-        // جلب كل الحصص التي تنتمي ليوم الأسبوع المطلوب، باستخدام الـ timeSlot المرتبط
-        // بافتراض أن كل Session يحوي timeSlot مثل "09:00 - 09:30" ويجب الربط مع جدول المعلم
+        // جلب كل الحصص التي تنتمي ليوم الأسبوع المطلوب للمعلم
         const sessions = await Session.find({
-            teacherId: req.params.id,
-            dayOfWeek: dayOfWeek // تأكد أن الحصة تخزن dayOfWeek أو ضع شرط مناسب للفلترة
-        }).populate('studentId', 'name subscriptionType phone');
+            teacherId: new mongoose.Types.ObjectId(teacherId),
+            dayOfWeek: dayOfWeek // <--- الفلترة فقط على dayOfWeek
+        })
+            .populate('studentId', 'name subscriptionType');
 
         res.json(sessions);
     } catch (err) {
@@ -323,6 +357,7 @@ router.put('/sessions/:sessionId/update-status', protect, teacher, async (req, r
             // التحقق مما إذا كانت الحصة في الشهر الحالي للطالب
             if (sessionMonthStart.getTime() === currentMonthStart.getTime()) {
                 let sessionsChange = 0;
+                let absencesChange = 0;
 
                 // إذا كانت الحالة القديمة لم تكن "حضر" أو "غاب" وأصبحت كذلك
                 if ((status === 'حضَر' || status === 'غاب') && !(oldStatus === 'حضَر' || oldStatus === 'غاب')) {
@@ -335,9 +370,15 @@ router.put('/sessions/:sessionId/update-status', protect, teacher, async (req, r
                     session.countsTowardsBalance = false; // لم تعد تحسب في الرصيد
                 }
                 // إذا كانت الحالة لم تتغير (مثلاً "مجدولة" بقيت "مجدولة" أو "حضَر" بقيت "حضَر")، لا تغيير في sessionsChange
+                // منطق تحديث absencesThisPeriod
+                if (status === 'غاب' && oldStatus !== 'غاب') {
+                    absencesChange = 1; // إذا أصبحت الحالة "غاب" ولم تكن كذلك من قبل
+                } else if (oldStatus === 'غاب' && status !== 'غاب') {
+                    absencesChange = -1; // إذا كانت الحالة "غاب" وتغيرت إلى شيء آخر
+                }
 
                 student.sessionsCompletedThisPeriod = Math.max(0, (student.sessionsCompletedThisPeriod || 0) + sessionsChange);
-
+                student.absencesThisPeriod = Math.max(0, (student.absencesThisPeriod || 0) + absencesChange);
                 // تحديث isRenewalNeeded بناءً على الرصيد الحالي
                 if (requiredMonthlySlots > 0 && student.sessionsCompletedThisPeriod >= requiredMonthlySlots) {
                     student.isRenewalNeeded = true;
@@ -346,8 +387,7 @@ router.put('/sessions/:sessionId/update-status', protect, teacher, async (req, r
                 }
                 await student.save();
             } else {
-                console.warn(`Session <span class="math-inline">\{session\.\_id\} is not in the current month \(</span>{session.date.toISOString().slice(0, 7)}). Student balance not updated for sessionsCompletedThisPeriod.`);
-                // هنا يمكننا تحديث `countsTowardsBalance` فقط للحصة نفسها إذا لزم الأمر، دون التأثير على الطالب
+                console.warn(`Session ${session._id} is not in the current month (${session.date.toISOString().slice(0, 7)}). Student balance not updated for sessionsCompletedThisPeriod.`);
                 session.countsTowardsBalance = (status === 'حضَر' || status === 'غاب');
             }
         } else {
@@ -367,6 +407,7 @@ router.get('/:id', protect, adminOrTeacher, async (req, res) => {
     if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
         return res.status(403).json({ message: 'غير مصرح لك بمشاهدة بيانات هذا المعلم.' });
     }
+    const teacherId = req.params.id;
     try {
         const teacher = await Teacher.findById(req.params.id)
             .populate({
@@ -397,8 +438,9 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
     if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
         return res.status(403).json({ message: 'غير مصرح لك بمشاهدة لوحة تحكم هذا المعلم.' });
     }
+    const teacherId = req.params.id;
     try {
-        const teacherId = req.params.id;
+
         const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
         const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
 
@@ -409,18 +451,17 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
         }
 
         const activeSubscribedStudentsCount = await Student.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             isArchived: false,
-            subscriptionType: { $nin: ['حلقة تجريبية', 'أخرى'] }
-        });
 
+        });
         const convertedStudentsCount = await Student.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             trialStatus: 'تم التحويل للاشتراك',
         });
 
         const completedTrialSessionsTaught = await Session.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             isTrial: true,
             status: { $in: ['حضَر', 'غاب'] },
             date: { $gte: startOfMonth, $lte: endOfMonth }
@@ -428,7 +469,7 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
 
         // حساب الحصص المكتملة بناءً على `countsTowardsBalance`
         const completedMonthlySessions = await Session.countDocuments({
-            teacherId: teacherId,
+            teacherId: new mongoose.Types.ObjectId(teacherId),
             status: { $in: ['حضَر', 'غاب'] }, // حصص حضرها أو غاب عنها (تحسب في الرصيد)
             countsTowardsBalance: true, // تأكد أنها تحسب في الرصيد
             date: { $gte: startOfMonth, $lte: endOfMonth }
@@ -442,7 +483,7 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
             {
                 $match: {
                     entityType: 'Teacher',
-                    entityId: mongoose.Types.ObjectId(teacherId),
+                    entityId: new mongoose.Types.ObjectId(teacherId),
                     type: 'salary_payment',
                     date: { $gte: startOfMonth, $lte: endOfMonth },
                     status: { $in: ['paid', 'partial'] }
@@ -459,7 +500,7 @@ router.get('/:id/dashboard-summary', protect, adminOrTeacher, async (req, res) =
 
 
         let weeklyScheduledSlots = 0;
-        const teacherSchedule = await Teacher.findById(teacherId).select('availableTimeSlots');
+        const teacherSchedule = await Teacher.findById(new mongoose.Types.ObjectId(teacherId)).select('availableTimeSlots');
         if (teacherSchedule) {
             teacherSchedule.availableTimeSlots.forEach(slot => {
                 if (slot.isBooked && slot.bookedBy) {

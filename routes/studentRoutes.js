@@ -162,6 +162,20 @@ router.post('/', protect, admin, async (req, res) => {
                 if (timeSlotIndex !== -1) {
                     teacher.availableTimeSlots[timeSlotIndex].isBooked = true;
                     teacher.availableTimeSlots[timeSlotIndex].bookedBy = savedStudent._id;
+
+                    // *** أضف هذا الجزء لإنشاء Session ***
+                    const newSession = new Session({
+                        studentId: savedStudent._id,
+                        teacherId: teacher._id,
+                        teacherTimeSlotId: teacher.availableTimeSlots[timeSlotIndex]._id, // ربط بالخانة الزمنية للمعلم
+                        date: new Date(), // تاريخ اليوم الذي تم فيه الجدولة (هذا سيكون تاريخ إنشاء السجل)
+                        timeSlot: appt.timeSlot,
+                        dayOfWeek: appt.dayOfWeek,
+                        status: 'مجدولة', // حالة مبدئية
+                        isTrial: savedStudent.isTrial // تحديد ما إذا كانت تجريبية
+                    });
+                    await newSession.save();
+                    // *** نهاية الإضافة ***
                 }
             }
             await teacher.save();
@@ -224,7 +238,7 @@ router.put('/:id', protect, admin, async (req, res) => {
         student.teacherId = teacherId || null;
         student.scheduledAppointments = scheduledAppointments || [];
 
-        // 2. حجز المواعيد الجديدة للمعلم الجديد
+        // 2. حجز المواعيد الجديدة للمعلم الجديد وإنشاء Sessions لها
         if (student.teacherId && student.scheduledAppointments.length > 0) {
             const newTeacher = await Teacher.findById(student.teacherId);
             if (newTeacher) {
@@ -238,6 +252,32 @@ router.put('/:id', protect, admin, async (req, res) => {
                         }
                         newTeacher.availableTimeSlots[timeSlotIndex].isBooked = true;
                         newTeacher.availableTimeSlots[timeSlotIndex].bookedBy = student._id;
+
+                        // *** أضف هذا الجزء لإنشاء Session أو التأكد من وجودها ***
+                        // تحقق مما إذا كانت هناك جلسة (Session) موجودة بالفعل لهذا الموعد المحدد للطالب والمعلم
+                        const existingSession = await Session.findOne({
+                            studentId: student._id,
+                            teacherId: newTeacher._id,
+                            dayOfWeek: appt.dayOfWeek,
+                            timeSlot: appt.timeSlot,
+                            // يمكنك إضافة شروط أخرى هنا للتأكد من عدم تكرار الجلسة إذا كانت قديمة جداً مثلاً
+                        });
+
+                        if (!existingSession) {
+                            const newSession = new Session({
+                                studentId: student._id,
+                                teacherId: newTeacher._id,
+                                teacherTimeSlotId: newTeacher.availableTimeSlots[timeSlotIndex]._id,
+                                date: new Date(), // تاريخ الجدولة
+                                timeSlot: appt.timeSlot,
+                                dayOfWeek: appt.dayOfWeek,
+                                status: 'مجدولة',
+                                isTrial: student.isTrial
+                            });
+                            await newSession.save();
+                        }
+                        // *** نهاية الإضافة ***
+
                     } else {
                         throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} غير متاحة للمعلم.`);
                     }

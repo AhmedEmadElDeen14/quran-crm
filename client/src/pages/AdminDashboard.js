@@ -86,8 +86,8 @@ function AdminDashboard() {
                     <Button variant="secondary" size="md" className="w-full justify-start mb-4 text-right" disabled>
                         تقرير شهري (قريباً)
                     </Button>
-                    <Button variant="secondary" size="md" className="w-full justify-start text-right" disabled>
-                        تقارير مالية (قريباً)
+                    <Button variant="secondary" size="md" className="w-full justify-start text-right" onClick={goTo('/admin/financial-reports')}>
+                        التقارير المالية
                     </Button>
                 </Card>
             </section>

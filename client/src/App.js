@@ -74,7 +74,7 @@ function App() {
 
 
             {/* مسار لوحة تحكم المعلم (سنقوم بتصميمها لاحقًا) */}
-            {/* <Route path="/admin/teachers/dashboard" element={<PrivateRoute role="Teacher"><TeacherDashboard /></PrivateRoute>} /> */}
+            <Route path="/teacher/dashboard" element={<PrivateRoute role="Teacher"><TeacherDashboard /></PrivateRoute>} />
 
             {/* مسارات أخرى (مثل إدارة المستخدمين - سنضيفها لاحقًا) */}
             <Route path="/admin/users" element={<PrivateRoute role="Admin"><div>إدارة المستخدمين (قريباً)</div></PrivateRoute>} />

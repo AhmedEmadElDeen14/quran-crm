@@ -162,6 +162,7 @@ router.delete('/transactions/:id', protect, admin, async (req, res) => {
     }
 });
 
+
 // GET /api/finance/reports/monthly-summary?year=YYYY&month=MM
 // جلب تقرير شهري (إيرادات، مصروفات، مرتبات، صافي ربح) للمؤسسة
 router.get('/reports/monthly-summary', protect, admin, async (req, res) => {
@@ -172,48 +173,16 @@ router.get('/reports/monthly-summary', protect, admin, async (req, res) => {
     }
 
     // تنسيق الشهر ليتطابق مع حقل 'month' في نموذج AccountingSummary (مثلاً "2025-05")
-    const monthString = `<span class="math-inline">\{year\}\-</span>{String(month).padStart(2, '0')}`;
+    const monthString = `${year}-${String(month).padStart(2, '0')}`;
 
     try {
-        // ابحث عن الملخص المحاسبي الشهري الموجود
-        let accountingSummary = await AccountingSummary.findOne({ month: monthString });
+        // ابحث عن الملخص المحاسبي الشهري الموجود مباشرة
+        const accountingSummary = await AccountingSummary.findOne({ month: monthString });
 
         if (!accountingSummary) {
-            // إذا لم يتم العثور على ملخص، قم بحسابه من Transactions
-            const startDate = new Date(year, month - 1, 1);
-            const endDate = new Date(year, month, 0, 23, 59, 59);
-
-            const transactions = await Transaction.find({
-                date: { $gte: startDate, $lte: endDate },
-                status: { $in: ['paid', 'partial'] } // فقط الحركات المدفوعة أو المدفوعة جزئياً
-            });
-
-            let totalRevenue = 0;
-            let totalExpenses = 0;
-            let totalSalariesPaid = 0;
-
-            transactions.forEach(t => {
-                if (t.type === 'subscription_payment' || t.type === 'other_income') {
-                    totalRevenue += t.amount;
-                } else if (t.type === 'system_expense' || t.type === 'advertisement_expense' || t.type === 'other_expense') {
-                    totalExpenses += t.amount;
-                } else if (t.type === 'salary_payment') {
-                    totalSalariesPaid += t.amount;
-                }
-            });
-
-            const charityAmount = totalRevenue * 0.05;
-            const netProfit = totalRevenue - (totalExpenses + totalSalariesPaid + charityAmount);
-
-            // قم بإنشاء ملخص جديد وحفظه
-            accountingSummary = await AccountingSummary.create({
-                month: monthString,
-                totalRevenue,
-                totalExpenses,
-                totalSalariesPaid,
-                charityAmount,
-                netProfit
-            });
+            // إذا لم يتم العثور على ملخص، فهذا يعني أنه لم يتم حسابه بعد بواسطة Cron Job
+            // يمكن أن يكون هذا بسبب أن Cron Job لم يشتغل بعد لهذا الشهر أو أن الشهر المطلوب هو الشهر الحالي ولم ينتهِ بعد
+            return res.status(404).json({ message: 'ملخص محاسبي لهذا الشهر غير متاح بعد. يرجى المحاولة لاحقاً أو التأكد من تشغيل مهمة التجميع الشهرية.' });
         }
         res.json(accountingSummary);
     } catch (err) {

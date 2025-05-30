@@ -98,6 +98,21 @@ const studentSchema = new mongoose.Schema({
         trim: true,
         default: null
     },
+    sessionsCompletedThisPeriod: {
+        type: Number,
+        default: 0
+    },
+    absencesThisPeriod: { // عدد الغيابات في الفترة الحالية
+        type: Number,
+        default: 0
+    },
+    // يمكن إضافة حقول لغيابات مدفوعة/غير مدفوعة إذا أردت تفصيلاً أكثر
+    // paidAbsences: { type: Number, default: 0 },
+    // unpaidAbsences: { type: Number, default: 0 },
+    isRenewalNeeded: {
+        type: Boolean,
+        default: false
+    },
 
 }, { timestamps: true });
 
