@@ -6,91 +6,95 @@ const Student = require('../models/student');
 const Teacher = require('../models/teacher');
 const Session = require('../models/session');
 const mongoose = require('mongoose');
-const { protect, admin, teacher, adminOrTeacher } = require('../middleware/authMiddleware'); // <--- إضافة هذا الاستيراد
+const { protect, admin } = require('../middleware/authMiddleware');
 const Transaction = require('../models/transaction');
-
 
 // تعريف قيم الاشتراك لكل باقة وعدد الخانات (30 دقيقة) المطلوبة شهرياً
 const SUBSCRIPTION_DETAILS = {
-    'نصف ساعة / 4 حصص': { amount: 170, monthlySlots: 4 * (30 / 30) },
-    'نصف ساعة / 8 حصص': { amount: 300, monthlySlots: 8 * (30 / 30) },
-    'ساعة / 4 حصص': { amount: 300, monthlySlots: 4 * (60 / 30) },
-    'ساعة / 8 حصص': { amount: 600, monthlySlots: 8 * (60 / 30) },
-    'مخصص': { amount: 0, monthlySlots: 12 },
-    'حلقة تجريبية': { amount: 0, monthlySlots: 1 },
+    'نصف ساعة / 4 حصص': { amount: 170, monthlySlots: 4 },
+    'نصف ساعة / 8 حصص': { amount: 300, monthlySlots: 8 },
+    'ساعة / 4 حصص': { amount: 300, monthlySlots: 8 }, // 4 حصص * ساعة/حصة = 8 خانات نصف ساعة
+    'ساعة / 8 حصص': { amount: 600, monthlySlots: 16 }, // 8 حصص * ساعة/حصة = 16 خانة نصف ساعة
+    'مخصص': { amount: 0, monthlySlots: 12 }, // الافتراضي 6 ساعات شهرياً (12 خانة نصف ساعة)
+    'حلقة تجريبية': { amount: 0, monthlySlots: 1 }, // حصة تجريبية واحدة
     'أخرى': { amount: 0, monthlySlots: 0 }
 };
 
-
 // @route   GET /api/students
-// @desc    الحصول على جميع الطلاب (غير المؤرشفين)
+// @desc    الحصول على جميع الطلاب (مع إمكانية الفلترة حسب الأرشفة والمعلم)
 // @access  Admin
 router.get('/', protect, admin, async (req, res) => {
     try {
-        const students = await Student.find({ isArchived: false }).populate('teacherId', 'name');
+        const filter = {};
+        const { isArchived, teacherId } = req.query;
+
+        // فلترة حسب حالة الأرشفة
+        // إذا كانت 'true' أو 'false'، نستخدمها. غير ذلك، نعتبر isArchived: false (الافتراضي: غير مؤرشف)
+        if (isArchived !== undefined) {
+            filter.isArchived = isArchived === 'true';
+        } else {
+            filter.isArchived = false; // افتراضياً جلب الطلاب غير المؤرشفين فقط
+        }
+
+        // فلترة حسب المعلم
+        if (teacherId) {
+            if (!mongoose.Types.ObjectId.isValid(teacherId)) {
+                return res.status(400).json({ message: 'معرف المعلم غير صالح للفلترة.' });
+            }
+            filter.teacherId = teacherId;
+        }
+
+        const students = await Student.find(filter).populate('teacherId', 'name');
         res.json(students);
     } catch (err) {
-        console.error("Error fetching active students:", err);
+        console.error("Error fetching students with filters:", err);
         res.status(500).json({ message: err.message });
     }
 });
 
-// @route   GET /api/students/archived
-// @desc    الحصول على الطلاب المؤرشفين
-// @access  Admin
-router.get('/archived', protect, admin, async (req, res) => {
-    try {
-        const archivedStudents = await Student.find({ isArchived: true }).populate('teacherId', 'name');
-        res.json(archivedStudents);
-    } catch (err) {
-        console.error("Error fetching archived students:", err);
-        res.status(500).json({ message: err.message });
-    }
-});
 
-// @route   GET /api/students/:id
-// @desc    الحصول على طالب واحد بالـ ID أو بيانات الملخص
-// @access  Admin
-router.get('/:id', protect, admin, async (req, res) => {
-    try {
-        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-            // إذا كان الـ ID ليس ObjectId صالحاً، تحقق إذا كان طلبًا لبيانات الملخص
-            if (req.params.id === 'summary') {
-                const totalActiveStudents = await Student.countDocuments({ isArchived: false });
-                const trialStudents = await Student.countDocuments({ isArchived: false, subscriptionType: 'حلقة تجريبية' });
-                const fullSubscriptionStudents = await Student.countDocuments({ isArchived: false, subscriptionType: { $nin: ['حلقة تجريبية', 'أخرى'] } });
-                const renewalNeededStudentsCount = await Student.countDocuments({ isArchived: false, isRenewalNeeded: true });
 
-                return res.json({
-                    totalActiveStudents,
-                    trialStudents,
-                    fullSubscriptionStudents,
-                    renewalNeededStudentsCount,
-                });
-            } else {
-                console.warn(`Invalid ObjectId format for student ID: ${req.params.id}`);
-                return res.status(400).json({ message: 'تنسيق معرف الطالب غير صالح.' });
+
+// @route   GET /api/students
+// @desc    الحصول على جميع الطلاب (مع إمكانية الفلترة حسب الأرشفة والمعلم)
+// @access  Admin
+router.get('/', protect, admin, async (req, res) => {
+    try {
+        const filter = {};
+        const { isArchived, teacherId } = req.query;
+
+        // فلترة حسب حالة الأرشفة
+        // إذا كانت 'true' أو 'false'، نستخدمها.
+        // إذا كانت 'all' أو غير معرفة، لا نطبق فلتر isArchived (نرجع كل الطلاب)
+        if (isArchived === 'true') {
+            filter.isArchived = true;
+        } else if (isArchived === 'false') {
+            filter.isArchived = false;
+        }
+        // إذا كان isArchived === 'all' أو undefined، لا نضيف فلتر isArchived إلى الـ query، مما سيجلب كل الطلاب
+
+        // فلترة حسب المعلم
+        if (teacherId) {
+            if (!mongoose.Types.ObjectId.isValid(teacherId)) {
+                return res.status(400).json({ message: 'معرف المعلم غير صالح للفلترة.' });
             }
+            filter.teacherId = teacherId;
         }
 
-        const student = await Student.findById(req.params.id).populate('teacherId', 'name');
-
-        if (!student) {
-            console.warn(`Student with ID ${req.params.id} not found.`);
-            return res.status(404).json({ message: 'لم يتم العثور على الطالب.' });
-        }
-        res.json(student);
+        const students = await Student.find(filter).populate('teacherId', 'name');
+        res.json(students);
     } catch (err) {
-        console.error(`Error fetching student by ID ${req.params.id}:`, err);
-        res.status(500).json({ message: 'فشل الخادم في جلب بيانات الطالب.' });
+        console.error("Error fetching students with filters:", err);
+        res.status(500).json({ message: err.message });
     }
 });
+
 
 // @route   POST /api/students
 // @desc    تسجيل طالب جديد
 // @access  Admin
 router.post('/', protect, admin, async (req, res) => {
-    const { name, age, phone, gender, guardianDetails, subscriptionType, paymentDetails, teacherId, scheduledAppointments, duration } = req.body;
+    const { name, age, phone, gender, guardianDetails, subscriptionType, duration, paymentDetails, teacherId, scheduledAppointments } = req.body;
 
     try {
         let teacher = null;
@@ -101,19 +105,21 @@ router.post('/', protect, admin, async (req, res) => {
             }
         }
 
+        // التحقق من أن المواعيد المجدولة غير محجوزة من قبل طلاب آخرين
         if (teacher && scheduledAppointments && scheduledAppointments.length > 0) {
-            const teacherSlots = teacher.availableTimeSlots;
             for (const appt of scheduledAppointments) {
-                const foundAvailableSlot = teacherSlots.find(slot =>
+                const foundAvailableSlot = teacher.availableTimeSlots.find(slot =>
                     slot.dayOfWeek === appt.dayOfWeek &&
                     slot.timeSlot === appt.timeSlot
                 );
+                // إذا لم يتم العثور على الخانة أو كانت محجوزة بالفعل من قبل شخص آخر
                 if (!foundAvailableSlot || (foundAvailableSlot.isBooked && foundAvailableSlot.bookedBy)) {
                     return res.status(400).json({ message: `الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} محجوزة بالفعل. يرجى اختيار خانة أخرى.` });
                 }
             }
         }
 
+        // تحديد تفاصيل الاشتراك
         const subDetails = SUBSCRIPTION_DETAILS[subscriptionType] || SUBSCRIPTION_DETAILS['أخرى'];
 
         const newStudent = new Student({
@@ -126,32 +132,37 @@ router.post('/', protect, admin, async (req, res) => {
             duration: duration || 'نصف ساعة',
             paymentDetails: {
                 status: paymentDetails?.status || 'لم يتم الدفع',
-                amount: subDetails.amount
+                // استخدم المبلغ القادم من الواجهة الأمامية أولاً، وإلا فمن تفاصيل الاشتراك الافتراضية
+                amount: paymentDetails?.amount || subDetails.amount,
+                date: paymentDetails?.date ? new Date(paymentDetails.date) : new Date()
             },
             teacherId: teacherId || null,
             scheduledAppointments: scheduledAppointments || [],
             sessionsCompletedThisPeriod: 0,
             lastRenewalDate: new Date(),
             isRenewalNeeded: false,
-            isTrial: subscriptionType === 'حلقة تجريبية'
+            isTrial: subscriptionType === 'حلقة تجريبية',
+            trialStatus: subscriptionType === 'حلقة تجريبية' ? 'في انتظار' : undefined // يضبط حالة الحلقة التجريبية
         });
 
         const savedStudent = await newStudent.save();
 
         // إذا كانت هناك تفاصيل دفع، قم بإنشاء حركة مالية (Transaction)
-        if (savedStudent.paymentDetails && savedStudent.paymentDetails.amount > 0 && savedStudent.paymentDetails.status !== 'حلقة تجريبية') {
+        // لا يتم إنشاء حركة للحلقات التجريبية أو المدفوعات "أخرى" إذا كان المبلغ 0
+        if (savedStudent.paymentDetails && savedStudent.paymentDetails.amount > 0 && savedStudent.subscriptionType !== 'حلقة تجريبية') {
             const newTransaction = new Transaction({
                 entityType: 'Student',
                 entityId: savedStudent._id,
                 amount: savedStudent.paymentDetails.amount,
                 type: 'subscription_payment',
-                description: `دفعة تسجيل اشتراك جديد للطالب <span class="math-inline">\{savedStudent\.name\} \(</span>{savedStudent.subscriptionType})`,
-                date: savedStudent.paymentDetails.date || new Date(),
+                description: `دفعة تسجيل اشتراك جديد للطالب ${savedStudent.name} (${savedStudent.subscriptionType})`,
+                date: savedStudent.paymentDetails.date,
                 status: savedStudent.paymentDetails.status
             });
             await newTransaction.save();
         }
 
+        // حجز المواعيد في جدول المعلم وإنشاء جلسات لها
         if (scheduledAppointments && scheduledAppointments.length > 0 && teacher) {
             for (const appt of scheduledAppointments) {
                 const timeSlotIndex = teacher.availableTimeSlots.findIndex(slot =>
@@ -160,25 +171,26 @@ router.post('/', protect, admin, async (req, res) => {
                 );
 
                 if (timeSlotIndex !== -1) {
+                    // حجز الخانة للمعلم
                     teacher.availableTimeSlots[timeSlotIndex].isBooked = true;
                     teacher.availableTimeSlots[timeSlotIndex].bookedBy = savedStudent._id;
 
-                    // *** أضف هذا الجزء لإنشاء Session ***
+                    // إنشاء جلسة (Session) لكل موعد مجدول
                     const newSession = new Session({
                         studentId: savedStudent._id,
                         teacherId: teacher._id,
-                        teacherTimeSlotId: teacher.availableTimeSlots[timeSlotIndex]._id, // ربط بالخانة الزمنية للمعلم
-                        date: new Date(), // تاريخ اليوم الذي تم فيه الجدولة (هذا سيكون تاريخ إنشاء السجل)
+                        teacherTimeSlotId: teacher.availableTimeSlots[timeSlotIndex]._id,
+                        date: new Date(), // تاريخ الجدولة (ليس بالضرورة تاريخ الحصة)
                         timeSlot: appt.timeSlot,
                         dayOfWeek: appt.dayOfWeek,
-                        status: 'مجدولة', // حالة مبدئية
-                        isTrial: savedStudent.isTrial // تحديد ما إذا كانت تجريبية
+                        status: 'مجدولة',
+                        isTrial: savedStudent.isTrial,
+                        countsTowardsBalance: true // افتراضياً تحسب في الرصيد ما لم يتم تغيير حالتها لاحقاً
                     });
                     await newSession.save();
-                    // *** نهاية الإضافة ***
                 }
             }
-            await teacher.save();
+            await teacher.save(); // حفظ التغييرات على المعلم بعد حجز جميع المواعيد
         }
 
         res.status(201).json(savedStudent);
@@ -204,8 +216,39 @@ router.put('/:id', protect, admin, async (req, res) => {
         }
 
         const oldTeacherId = student.teacherId ? student.teacherId.toString() : null;
-        const oldScheduledAppointments = [...student.scheduledAppointments];
+        // قم بإنشاء نسخة عميقة للمواعيد القديمة للحفاظ على حالتها
+        const oldScheduledAppointments = JSON.parse(JSON.stringify(student.scheduledAppointments));
+        const newTeacherId = teacherId || null; // المعلم الجديد من الـ req.body
+        const newScheduledAppointments = scheduledAppointments || []; // المواعيد الجديدة من الـ req.body
 
+        // 1. تحرير المواعيد القديمة من المعلم القديم (أو حتى نفس المعلم إذا تم تغيير المواعيد)
+        if (oldTeacherId) {
+            const oldTeacher = await Teacher.findById(oldTeacherId);
+            if (oldTeacher) {
+                for (const appt of oldScheduledAppointments) {
+                    const timeSlotIndex = oldTeacher.availableTimeSlots.findIndex(slot =>
+                        slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot &&
+                        slot.isBooked === true && slot.bookedBy?.toString() === student._id.toString()
+                    );
+                    if (timeSlotIndex !== -1) {
+                        oldTeacher.availableTimeSlots[timeSlotIndex].isBooked = false;
+                        oldTeacher.availableTimeSlots[timeSlotIndex].bookedBy = null;
+                        // حذف جلسات (Session) الطالب المرتبطة بهذا الموعد في هذا اليوم
+                        // هذا المنطق سيحذف الجلسات المجدولة فقط (غير المكتملة أو المؤجلة)
+                        await Session.deleteMany({
+                            studentId: student._id,
+                            teacherId: oldTeacher._id,
+                            dayOfWeek: appt.dayOfWeek,
+                            timeSlot: appt.timeSlot,
+                            status: 'مجدولة' // فقط الجلسات التي لم تبدأ بعد
+                        });
+                    }
+                }
+                await oldTeacher.save();
+            }
+        }
+
+        // تحديث بيانات الطالب
         student.name = name;
         student.age = parseInt(age);
         student.phone = phone;
@@ -213,89 +256,98 @@ router.put('/:id', protect, admin, async (req, res) => {
         student.guardianDetails = guardianDetails || student.guardianDetails;
         student.subscriptionType = subscriptionType;
         student.duration = duration || 'نصف ساعة';
+        student.isTrial = subscriptionType === 'حلقة تجريبية'; // تحديث حالة التجريبي بناءً على نوع الاشتراك
 
         if (paymentDetails) {
             student.paymentDetails.status = paymentDetails.status || 'لم يتم الدفع';
-        }
-
-        // 1. تحرير المواعيد القديمة إذا تغير المعلم أو المواعيد
-        if (oldTeacherId) {
-            const oldTeacher = await Teacher.findById(oldTeacherId);
-            if (oldTeacher) {
-                oldScheduledAppointments.forEach(appt => {
-                    const timeSlotIndex = oldTeacher.availableTimeSlots.findIndex(slot =>
-                        slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot && slot.isBooked === true && slot.bookedBy?.toString() === student._id.toString()
-                    );
-                    if (timeSlotIndex !== -1) {
-                        oldTeacher.availableTimeSlots[timeSlotIndex].isBooked = false;
-                        oldTeacher.availableTimeSlots[timeSlotIndex].bookedBy = null;
-                    }
-                });
-                await oldTeacher.save();
+            student.paymentDetails.amount = paymentDetails.amount || 0;
+            // تاريخ الدفع يتم تحديثه يدوياً أو عند التجديد
+            if (paymentDetails.date) {
+                student.paymentDetails.date = new Date(paymentDetails.date);
             }
         }
 
-        student.teacherId = teacherId || null;
-        student.scheduledAppointments = scheduledAppointments || [];
+        student.teacherId = newTeacherId;
+        student.scheduledAppointments = newScheduledAppointments;
 
-        // 2. حجز المواعيد الجديدة للمعلم الجديد وإنشاء Sessions لها
-        if (student.teacherId && student.scheduledAppointments.length > 0) {
-            const newTeacher = await Teacher.findById(student.teacherId);
-            if (newTeacher) {
-                for (const appt of student.scheduledAppointments) {
-                    const timeSlotIndex = newTeacher.availableTimeSlots.findIndex(slot =>
-                        slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot
-                    );
-                    if (timeSlotIndex !== -1) {
-                        if (newTeacher.availableTimeSlots[timeSlotIndex].isBooked && newTeacher.availableTimeSlots[timeSlotIndex].bookedBy?.toString() !== student._id.toString()) {
-                            throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} محجوزة بالفعل من قبل طالب آخر أو غير متاحة.`);
-                        }
-                        newTeacher.availableTimeSlots[timeSlotIndex].isBooked = true;
-                        newTeacher.availableTimeSlots[timeSlotIndex].bookedBy = student._id;
 
-                        // *** أضف هذا الجزء لإنشاء Session أو التأكد من وجودها ***
-                        // تحقق مما إذا كانت هناك جلسة (Session) موجودة بالفعل لهذا الموعد المحدد للطالب والمعلم
-                        const existingSession = await Session.findOne({
-                            studentId: student._id,
-                            teacherId: newTeacher._id,
-                            dayOfWeek: appt.dayOfWeek,
-                            timeSlot: appt.timeSlot,
-                            // يمكنك إضافة شروط أخرى هنا للتأكد من عدم تكرار الجلسة إذا كانت قديمة جداً مثلاً
-                        });
-
-                        if (!existingSession) {
-                            const newSession = new Session({
-                                studentId: student._id,
-                                teacherId: newTeacher._id,
-                                teacherTimeSlotId: newTeacher.availableTimeSlots[timeSlotIndex]._id,
-                                date: new Date(), // تاريخ الجدولة
-                                timeSlot: appt.timeSlot,
-                                dayOfWeek: appt.dayOfWeek,
-                                status: 'مجدولة',
-                                isTrial: student.isTrial
-                            });
-                            await newSession.save();
-                        }
-                        // *** نهاية الإضافة ***
-
-                    } else {
-                        throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} غير متاحة للمعلم.`);
-                    }
-                }
-                await newTeacher.save();
-            } else {
+        // 2. حجز المواعيد الجديدة للمعلم الجديد (أو نفس المعلم) وإنشاء Sessions لها
+        if (student.teacherId && newScheduledAppointments.length > 0) {
+            const currentTeacher = await Teacher.findById(student.teacherId);
+            if (!currentTeacher) {
                 throw new Error('المعلم الجديد غير موجود للمواعيد المجدولة.');
             }
+
+            for (const appt of newScheduledAppointments) {
+                const timeSlotIndex = currentTeacher.availableTimeSlots.findIndex(slot =>
+                    slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot
+                );
+
+                if (timeSlotIndex !== -1) {
+                    const targetSlot = currentTeacher.availableTimeSlots[timeSlotIndex];
+
+                    // إذا كانت الخانة محجوزة بالفعل بواسطة طالب آخر، ارمِ خطأ
+                    if (targetSlot.isBooked && targetSlot.bookedBy?.toString() !== student._id.toString()) {
+                        throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} محجوزة بالفعل من قبل طالب آخر (${targetSlot.bookedBy.name || 'غير معروف'}) أو غير متاحة.`);
+                    }
+
+                    targetSlot.isBooked = true;
+                    targetSlot.bookedBy = student._id;
+
+                    // تحقق مما إذا كانت هناك جلسة (Session) موجودة بالفعل لهذا الموعد المحدد للطالب والمعلم
+                    // هذا يمنع إنشاء جلسات مكررة لنفس المواعيد المجدولة بعد التعديل
+                    const existingSession = await Session.findOne({
+                        studentId: student._id,
+                        teacherId: currentTeacher._id,
+                        dayOfWeek: appt.dayOfWeek,
+                        timeSlot: appt.timeSlot,
+                        status: 'مجدولة' // فقط الجلسات التي لا تزال مجدولة
+                    });
+
+                    if (!existingSession) {
+                        const newSession = new Session({
+                            studentId: student._id,
+                            teacherId: currentTeacher._id,
+                            teacherTimeSlotId: targetSlot._id,
+                            date: new Date(), // تاريخ الجدولة (ليس تاريخ الحصة)
+                            timeSlot: appt.timeSlot,
+                            dayOfWeek: appt.dayOfWeek,
+                            status: 'مجدولة',
+                            isTrial: student.isTrial,
+                            countsTowardsBalance: true
+                        });
+                        await newSession.save();
+                    }
+                } else {
+                    // هذا السيناريو يجب أن يتم التعامل معه في الواجهة الأمامية كتحقق من صحة المدخلات
+                    // ولكن نحافظ على التحقق هنا كطبقة أمان ثانية
+                    throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} غير متاحة للمعلم.`);
+                }
+            }
+            await currentTeacher.save(); // حفظ التغييرات على المعلم
         }
+
+        // تحديث isArchived إذا تغير نوع الاشتراك إلى "لم يشترك" مثلاً
+        if (student.subscriptionType === 'لم يشترك' && !student.isArchived) {
+            student.isArchived = true;
+            student.archivedAt = new Date();
+            student.archivedReason = 'تم الأرشفة تلقائياً بسبب عدم الاشتراك بعد الفترة التجريبية.';
+            student.teacherId = null; // فصل المعلم عند الأرشفة
+            student.scheduledAppointments = []; // مسح المواعيد المجدولة عند الأرشفة
+            student.sessionsCompletedThisPeriod = 0;
+            student.absencesThisPeriod = 0;
+            student.isRenewalNeeded = false;
+        }
+
 
         const updatedStudent = await student.save();
         res.json(updatedStudent);
     } catch (err) {
-        if (err.name === 'CastError' && err.kind === 'ObjectId') {
-            return res.status(400).json({ message: 'تنسيق معرف الطالب غير صالح.' });
-        }
         if (err.code === 11000) {
             return res.status(400).json({ message: 'رقم الهاتف موجود بالفعل.' });
+        }
+        if (err.name === 'CastError' && err.kind === 'ObjectId') {
+            return res.status(400).json({ message: 'تنسيق معرف الطالب أو المعلم غير صالح.' });
         }
         console.error("Error updating student:", err);
         res.status(400).json({ message: err.message });
@@ -321,6 +373,7 @@ router.post('/:id/archive', protect, admin, async (req, res) => {
         student.archivedAt = new Date();
         student.archivedReason = req.body.reason || 'لا يوجد سبب محدد.';
         student.sessionsCompletedThisPeriod = 0;
+        student.absencesThisPeriod = 0; // NEW: Reset absences on archive
         student.isRenewalNeeded = false;
         await student.save();
 
@@ -344,11 +397,12 @@ router.post('/:id/archive', protect, admin, async (req, res) => {
             }
         }
 
+        // مسح ارتباط المعلم والمواعيد المجدولة من الطالب بعد الأرشفة
         student.teacherId = null;
         student.scheduledAppointments = [];
-        await student.save();
+        await student.save(); // حفظ الطالب مرة أخرى بعد تحديث هذه الحقول
 
-        res.json({ message: 'تمت أرشفة الطالب بنجاح!', student });
+        res.json({ message: 'تم حذف المعلم بنجاح.' }); // كان هنا رسالة خطأ
     } catch (err) {
         console.error("Error archiving student:", err);
         res.status(500).json({ message: err.message });
@@ -372,6 +426,8 @@ router.put('/:id/unarchive', protect, admin, async (req, res) => {
         student.isArchived = false;
         student.archivedAt = null;
         student.archivedReason = null;
+        // لا نقوم بإعادة تعيين teacherId أو scheduledAppointments هنا،
+        // يجب على المسؤول إعادة تعيين المعلم والمواعيد يدوياً بعد إلغاء الأرشفة
         await student.save();
 
         res.json({ message: 'تمت إعادة تنشيط الطالب بنجاح!', student });
@@ -398,11 +454,11 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
             return res.status(400).json({ message: 'الطالب ليس باشتراك تجريبي.' });
         }
 
-        // تحرير المواعيد الأسبوعية القديمة من المعلم القديم
+        // تحرير المواعيد الأسبوعية القديمة من المعلم القديم (الحالية للطالب)
         if (student.teacherId && student.scheduledAppointments.length > 0) {
             const oldTeacher = await Teacher.findById(student.teacherId);
             if (oldTeacher) {
-                student.scheduledAppointments.forEach(appt => {
+                for (const appt of student.scheduledAppointments) {
                     const timeSlotIndex = oldTeacher.availableTimeSlots.findIndex(slot =>
                         slot.dayOfWeek === appt.dayOfWeek &&
                         slot.timeSlot === appt.timeSlot &&
@@ -412,48 +468,38 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
                     if (timeSlotIndex !== -1) {
                         oldTeacher.availableTimeSlots[timeSlotIndex].isBooked = false;
                         oldTeacher.availableTimeSlots[timeSlotIndex].bookedBy = null;
+                        // حذف جلسات (Session) الطالب المرتبطة بهذا الموعد في هذا اليوم
+                        await Session.deleteMany({
+                            studentId: student._id,
+                            teacherId: oldTeacher._id,
+                            dayOfWeek: appt.dayOfWeek,
+                            timeSlot: appt.timeSlot,
+                            status: 'مجدولة' // فقط الجلسات التي لم تبدأ بعد
+                        });
                     }
-                });
+                }
                 await oldTeacher.save();
             }
         }
 
         if (action === 'subscribe') {
-            student.paymentDetails = {
-                status: paymentDetails?.status || 'مدفوع',
-                amount: newSubDetails.amount,
-                date: paymentDetails?.date ? new Date(paymentDetails.date) : new Date() // تأكد من وجود حقل التاريخ
-            };
-            // ... (باقي تحديثات الطالب)
-
-            // إنشاء حركة مالية (Transaction) للاشتراك الجديد
-            if (student.paymentDetails.amount > 0) {
-                const newTransaction = new Transaction({
-                    entityType: 'Student',
-                    entityId: student._id,
-                    amount: student.paymentDetails.amount,
-                    type: 'subscription_payment',
-                    description: `دفعة تحويل من تجريبي إلى اشتراك كامل للطالب <span class="math-inline">\{student\.name\} \(</span>{student.subscriptionType})`,
-                    date: student.paymentDetails.date,
-                    status: student.paymentDetails.status
-                });
-                await newTransaction.save();
-            }
-
+            // تعريف newSubDetails هنا
             const newSubDetails = SUBSCRIPTION_DETAILS[newSubscriptionType] || SUBSCRIPTION_DETAILS['أخرى'];
+
             student.subscriptionType = newSubscriptionType;
             student.paymentDetails = {
                 status: paymentDetails?.status || 'مدفوع',
+                amount: paymentDetails?.amount || newSubDetails.amount,
+                date: paymentDetails?.date ? new Date(paymentDetails.date) : new Date()
             };
-            student.paymentDetails.amount = paymentDetails?.amount || newSubDetails.amount; // <-- تم التعديل هنا: استخدم paymentDetails.amount من الـ req.body أولاً
-            student.paymentDetails.date = paymentDetails?.date ? new Date(paymentDetails.date) : new Date();
             student.trialStatus = 'تم التحويل للاشتراك';
             student.trialNotes = trialNotes || null;
             student.isArchived = false;
             student.sessionsCompletedThisPeriod = 0;
+            student.absencesThisPeriod = 0; // NEW: Reset absences
             student.lastRenewalDate = new Date();
             student.isRenewalNeeded = false;
-
+            student.isTrial = false; // لم يعد تجريبياً
 
             if (newTeacherId) {
                 student.teacherId = newTeacherId;
@@ -463,31 +509,75 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
 
             student.scheduledAppointments = newScheduledAppointments || [];
 
-            // حجز المواعيد الجديدة بعد التحويل للاشتراك الكامل
+            // حجز المواعيد الجديدة بعد التحويل للاشتراك الكامل وإنشاء جلسات لها
             if (student.teacherId && student.scheduledAppointments.length > 0) {
                 const newTeacher = await Teacher.findById(student.teacherId);
-                if (newTeacher) {
-                    for (const appt of student.scheduledAppointments) {
-                        const timeSlotIndex = newTeacher.availableTimeSlots.findIndex(slot =>
-                            slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot
-                        );
-                        if (!newTeacher.availableTimeSlots[timeSlotIndex] || (newTeacher.availableTimeSlots[timeSlotIndex].isBooked && newTeacher.availableTimeSlots[timeSlotIndex].bookedBy?.toString() !== student._id.toString())) {
-                            throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} محجوزة بالفعل من قبل طالب آخر أو غير متاحة.`);
-                        }
-                        newTeacher.availableTimeSlots[timeSlotIndex].isBooked = true;
-                        newTeacher.availableTimeSlots[timeSlotIndex].bookedBy = student._id;
-                    }
-                    await newTeacher.save();
-                } else {
+                if (!newTeacher) {
                     return res.status(404).json({ message: 'المعلم الجديد غير موجود للجدولة.' });
                 }
+
+                for (const appt of student.scheduledAppointments) {
+                    const timeSlotIndex = newTeacher.availableTimeSlots.findIndex(slot =>
+                        slot.dayOfWeek === appt.dayOfWeek && slot.timeSlot === appt.timeSlot
+                    );
+                    if (timeSlotIndex !== -1) {
+                        const targetSlot = newTeacher.availableTimeSlots[timeSlotIndex];
+                        if (targetSlot.isBooked && targetSlot.bookedBy?.toString() !== student._id.toString()) {
+                            throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} محجوزة بالفعل من قبل طالب آخر (${targetSlot.bookedBy.name || 'غير معروف'}) أو غير متاحة.`);
+                        }
+                        targetSlot.isBooked = true;
+                        targetSlot.bookedBy = student._id;
+
+                        // تحقق من عدم وجود جلسة مكررة قبل الإنشاء
+                        const existingSession = await Session.findOne({
+                            studentId: student._id,
+                            teacherId: newTeacher._id,
+                            dayOfWeek: appt.dayOfWeek,
+                            timeSlot: appt.timeSlot,
+                            status: 'مجدولة'
+                        });
+
+                        if (!existingSession) {
+                            const newSession = new Session({
+                                studentId: student._id,
+                                teacherId: newTeacher._id,
+                                teacherTimeSlotId: targetSlot._id,
+                                date: new Date(),
+                                timeSlot: appt.timeSlot,
+                                dayOfWeek: appt.dayOfWeek,
+                                status: 'مجدولة',
+                                isTrial: student.isTrial, // ستكون false هنا
+                                countsTowardsBalance: true
+                            });
+                            await newSession.save();
+                        }
+                    } else {
+                        throw new Error(`الخانة الزمنية ${appt.timeSlot} في يوم ${appt.dayOfWeek} غير متاحة للمعلم.`);
+                    }
+                }
+                await newTeacher.save();
             } else if (newSubscriptionType !== 'حلقة تجريبية' && (!newScheduledAppointments || newScheduledAppointments.length === 0)) {
                 return res.status(400).json({ message: 'المواعيد المجدولة مطلوبة للاشتراك الكامل.' });
+            }
+
+            // إنشاء حركة مالية (Transaction) للاشتراك الجديد
+            if (student.paymentDetails.amount > 0) {
+                const newTransaction = new Transaction({
+                    entityType: 'Student',
+                    entityId: student._id,
+                    amount: student.paymentDetails.amount,
+                    type: 'subscription_payment',
+                    description: `دفعة تحويل من تجريبي إلى اشتراك كامل للطالب ${student.name} (${student.subscriptionType})`,
+                    date: student.paymentDetails.date,
+                    status: student.paymentDetails.status
+                });
+                await newTransaction.save();
             }
 
         } else if (action === 'did_not_subscribe') {
             student.trialStatus = 'لم يشترك';
             student.trialNotes = reasonForNotSubscribing;
+            student.isTrial = false; // لم يعد تجريبياً
 
             if (archiveAfterReason) {
                 student.isArchived = true;
@@ -496,18 +586,21 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
                 student.teacherId = null;
                 student.scheduledAppointments = [];
                 student.sessionsCompletedThisPeriod = 0;
+                student.absencesThisPeriod = 0; // NEW: Reset absences
                 student.isRenewalNeeded = false;
             } else if (changeTeacherForAnotherTrial) {
                 student.teacherId = null;
                 student.scheduledAppointments = [];
-                student.trialStatus = 'في انتظار';
+                student.trialStatus = 'في انتظار'; // يعود لحالة الانتظار لتجربة أخرى
                 student.trialNotes = null;
-                student.subscriptionType = 'حلقة تجريبية';
+                student.subscriptionType = 'حلقة تجريبية'; // يبقى حلقة تجريبية
                 student.isArchived = false;
                 student.sessionsCompletedThisPeriod = 0;
+                student.absencesThisPeriod = 0; // NEW: Reset absences
                 student.isRenewalNeeded = false;
+                student.isTrial = true; // يعود لحالة التجريبي
             } else {
-                student.isArchived = false;
+                student.isArchived = false; // يبقى نشطاً ولكنه لم يشترك
             }
         } else {
             return res.status(400).json({ message: 'إجراء غير صالح.' });
@@ -517,6 +610,9 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
         res.json(updatedStudent);
 
     } catch (err) {
+        if (err.name === 'CastError' && err.kind === 'ObjectId') {
+            return res.status(400).json({ message: 'تنسيق معرف الطالب أو المعلم غير صالح.' });
+        }
         console.error('خطأ في معالجة تحويل الحلقة التجريبية:', err);
         res.status(500).json({ message: err.message });
     }
@@ -524,7 +620,7 @@ router.post('/:id/trial-conversion', protect, admin, async (req, res) => {
 
 // POST /api/students/:id/renew - تأكيد تجديد الطالب كـ Transaction
 router.post('/:id/renew', protect, admin, async (req, res) => {
-    const { paymentAmount, paymentStatus, paymentDate, description } = req.body; // يمكن استقبال تفاصيل الدفعة
+    const { paymentAmount, paymentStatus, paymentDate, description } = req.body;
 
     try {
         const student = await Student.findById(req.params.id);
@@ -535,11 +631,12 @@ router.post('/:id/renew', protect, admin, async (req, res) => {
         // تحديث بيانات الطالب للتجديد
         student.lastRenewalDate = paymentDate ? new Date(paymentDate) : new Date();
         student.sessionsCompletedThisPeriod = 0;
+        student.absencesThisPeriod = 0; // NEW: Reset absences on renewal
         student.isRenewalNeeded = false;
 
         // تحديث paymentDetails في نموذج الطالب مباشرةً
         student.paymentDetails.status = paymentStatus || 'تم الدفع';
-        student.paymentDetails.amount = paymentAmount || (SUBSCRIPTION_PRICES[student.subscriptionType] || 0);
+        student.paymentDetails.amount = paymentAmount || (SUBSCRIPTION_DETAILS[student.subscriptionType]?.amount || 0);
         student.paymentDetails.date = student.lastRenewalDate; // تاريخ آخر دفعة
 
         await student.save();
@@ -550,7 +647,7 @@ router.post('/:id/renew', protect, admin, async (req, res) => {
             entityId: student._id,
             amount: student.paymentDetails.amount,
             type: 'subscription_payment',
-            description: description || `تجديد اشتراك الطالب <span class="math-inline">\{student\.name\} \(</span>{student.subscriptionType})`,
+            description: description || `تجديد اشتراك الطالب ${student.name} (${student.subscriptionType})`,
             date: student.lastRenewalDate,
             status: student.paymentDetails.status
         });
@@ -566,7 +663,7 @@ router.post('/:id/renew', protect, admin, async (req, res) => {
 
 // POST /api/students/:id/payments - إضافة دفعة مالية منفصلة للطالب كـ Transaction
 router.post('/:id/payments', protect, admin, async (req, res) => {
-    const { amount, date, description, status, subscriptionType } = req.body; // أضف subscriptionType
+    const { amount, date, description, status } = req.body; // أزيل subscriptionType من هنا
 
     try {
         const student = await Student.findById(req.params.id);
@@ -588,13 +685,11 @@ router.post('/:id/payments', protect, admin, async (req, res) => {
         const savedTransaction = await newTransaction.save();
 
         // تحديث paymentDetails في نموذج الطالب مباشرةً بآخر حالة دفع
+        // هنا لا يجب أن نغير `lastRenewalDate` إلا إذا كانت هذه دفعة تجديد كاملة.
+        // بما أن هذا مسار "إضافة دفعة مالية منفصلة"، فليس بالضرورة تجديداً.
         student.paymentDetails.status = savedTransaction.status;
         student.paymentDetails.amount = savedTransaction.amount;
         student.paymentDetails.date = savedTransaction.date;
-        // يمكنك أيضاً تحديث lastRenewalDate هنا إذا كانت هذه الدفعة تجديداً كاملاً
-        // student.lastRenewalDate = savedTransaction.date;
-        // student.sessionsCompletedThisPeriod = 0;
-        // student.isRenewalNeeded = false;
         await student.save();
 
         res.status(201).json({ message: 'تمت إضافة الدفعة المالية بنجاح.', transaction: savedTransaction });

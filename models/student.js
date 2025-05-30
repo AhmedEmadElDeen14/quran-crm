@@ -2,6 +2,17 @@
 
 const mongoose = require('mongoose');
 
+const SUBSCRIPTION_DETAILS = {
+    'نصف ساعة / 4 حصص': { amount: 170, monthlySlots: 4 },
+    'نصف ساعة / 8 حصص': { amount: 300, monthlySlots: 8 },
+    'ساعة / 4 حصص': { amount: 300, monthlySlots: 8 }, // 4 حصص * 60 دقيقة/حصة = 8 خانات نصف ساعة شهرياً
+    'ساعة / 8 حصص': { amount: 600, monthlySlots: 16 }, // 8 حصص * 60 دقيقة/حصة = 16 خانة نصف ساعة شهرياً
+    'مخصص': { amount: 0, monthlySlots: 12 }, // الافتراضي 6 ساعات شهرياً (12 خانة نصف ساعة)
+    'حلقة تجريبية': { amount: 0, monthlySlots: 1 }, // حصة تجريبية واحدة
+    'أخرى': { amount: 0, monthlySlots: 0 }
+};
+
+
 const studentSchema = new mongoose.Schema({
     name: {
         type: String,
@@ -52,7 +63,7 @@ const studentSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    duration: {
+    duration: { // مدة الحصة الواحدة
         type: String,
         enum: ['نصف ساعة', 'ساعة', 'ساعة ونصف', 'ساعتين'],
         default: 'نصف ساعة'
@@ -62,15 +73,19 @@ const studentSchema = new mongoose.Schema({
         amount: { type: Number, default: 0 },
         date: { type: Date, default: null } // تاريخ آخر دفعة
     },
-    sessionsCompletedThisPeriod: {
+    sessionsCompletedThisPeriod: { // عدد الحصص المكتملة في الفترة الحالية (الشهر عادة)
         type: Number,
         default: 0
     },
-    isRenewalNeeded: {
+    absencesThisPeriod: { // عدد الغيابات في الفترة الحالية
+        type: Number,
+        default: 0
+    },
+    isRenewalNeeded: { // هل يحتاج الطالب إلى تجديد الاشتراك
         type: Boolean,
         default: false
     },
-    scheduledAppointments: [
+    scheduledAppointments: [ // المواعيد الأسبوعية المجدولة
         {
             dayOfWeek: { type: String, required: true, enum: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] },
             timeSlot: { type: String, required: true }
@@ -88,60 +103,40 @@ const studentSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
-    trialStatus: {
+    trialStatus: { // حالة الحلقة التجريبية (للتتبع)
         type: String,
         enum: ['في انتظار', 'مكتملة', 'تم التحويل للاشتراك', 'لم يشترك'],
         default: 'في انتظار'
     },
-    trialNotes: {
+    trialNotes: { // ملاحظات عن الحلقة التجريبية أو سبب عدم الاشتراك
         type: String,
         trim: true,
         default: null
     },
-    sessionsCompletedThisPeriod: {
-        type: Number,
-        default: 0
-    },
-    absencesThisPeriod: { // عدد الغيابات في الفترة الحالية
-        type: Number,
-        default: 0
-    },
-    // يمكن إضافة حقول لغيابات مدفوعة/غير مدفوعة إذا أردت تفصيلاً أكثر
-    // paidAbsences: { type: Number, default: 0 },
-    // unpaidAbsences: { type: Number, default: 0 },
-    isRenewalNeeded: {
-        type: Boolean,
-        default: false
-    },
-
 }, { timestamps: true });
 
-// دالة لتحديد عدد الخانات المطلوبة للباقة شهرياً
+// NEW: Pre-save hook to automatically set isTrial based on subscriptionType
+studentSchema.pre('save', function (next) {
+    if (this.isModified('subscriptionType') || this.isNew) { // Check if subscriptionType is modified or if it's a new document
+        this.isTrial = this.subscriptionType === 'حلقة تجريبية';
+    }
+    next();
+});
+
+// دالة لتحديد عدد الخانات (30 دقيقة) المطلوبة للباقة شهرياً
+// هذه الدالة تعتمد على SUBSCRIPTION_DETAILS المعرفة في نفس الملف
 studentSchema.methods.getRequiredMonthlySlots = function () {
     const type = this.subscriptionType;
-    const duration = this.duration;
+    // const duration = this.duration; // لم نعد نستخدم duration هنا بشكل مباشر للحساب
 
-    let sessionsPerWeek = 0;
-    let durationPerSession = 30; // بوحدة الدقائق
+    let monthlySlots = SUBSCRIPTION_DETAILS[type]?.monthlySlots || 0;
 
-    switch (type) {
-        case 'نصف ساعة / 4 حصص': sessionsPerWeek = 1; durationPerSession = 30; break;
-        case 'نصف ساعة / 8 حصص': sessionsPerWeek = 2; durationPerSession = 30; break;
-        case 'ساعة / 4 حصص': sessionsPerWeek = 1; durationPerSession = 60; break;
-        case 'ساعة / 8 حصص': sessionsPerWeek = 2; durationPerSession = 60; break;
-        case 'حلقة تجريبية':
-        case 'مخصص':
-            sessionsPerWeek = (type === 'مخصص') ? 6 : 1; // الافتراضي 6 حصص للمخصص، 1 للتجريبية
-            if (duration === 'نصف ساعة') durationPerSession = 30;
-            else if (duration === 'ساعة') durationPerSession = 60;
-            else if (duration === 'ساعة ونصف') durationPerSession = 90;
-            else if (duration === 'ساعتين') durationPerSession = 120;
-            break;
-        default: sessionsPerWeek = 0; durationPerSession = 30; // لـ 'أخرى'
-    }
-
-    return sessionsPerWeek * (durationPerSession / 30) * 4; // 4 أسابيع في الشهر تقريبا
+    // في هذا النموذج، monthlySlots في SUBSCRIPTION_DETAILS يمثل بالفعل إجمالي الخانات نصف ساعة شهرياً
+    // لذا، لا يلزم إجراء حسابات إضافية بناءً على 'duration' هنا، حيث أن 'duration'
+    // يؤثر في monthlySlots مباشرة في تعريف SUBSCRIPTION_DETAILS
+    return monthlySlots;
 };
+
 
 const Student = mongoose.model('Student', studentSchema);
 

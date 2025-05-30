@@ -32,7 +32,7 @@ const teacherSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
-    isActive: {
+    active: { // <--- تم تغيير الاسم من isActive إلى active
         type: Boolean,
         default: true
     },

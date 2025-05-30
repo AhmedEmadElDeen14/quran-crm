@@ -23,23 +23,23 @@ function DrawerLayout() {
 
     // State to track dark mode
     const [isDarkMode, setIsDarkMode] = useState(() => {
-        // Check saved preference in localStorage or default to false
-        if (typeof window !== 'undefined') {
+        if (typeof window !== 'undefined') { // تحقق من وجود window
             return localStorage.getItem('darkMode') === 'true';
         }
-        return false;
+        return false; // القيمة الافتراضية إذا لم يكن هناك window
     });
 
     // Apply or remove dark class on <html> on mount and whenever isDarkMode changes
     useEffect(() => {
-        const htmlEl = document.documentElement;
-        if (isDarkMode) {
-            htmlEl.classList.add('dark');
-        } else {
-            htmlEl.classList.remove('dark');
+        if (typeof window !== 'undefined') { // تحقق من وجود window
+            const htmlEl = document.documentElement;
+            if (isDarkMode) {
+                htmlEl.classList.add('dark');
+            } else {
+                htmlEl.classList.remove('dark');
+            }
+            localStorage.setItem('darkMode', isDarkMode.toString());
         }
-        // Save preference
-        localStorage.setItem('darkMode', isDarkMode.toString());
     }, [isDarkMode]);
 
     const toggleDrawer = () => setIsOpen(!isOpen);
@@ -93,18 +93,11 @@ function DrawerLayout() {
 
                     <button
                         onClick={logout}
-                        className="btn btn-ghost btn-icon hidden lg:flex items-center gap-1"
+                        className="btn btn-ghost btn-icon flex items-center gap-1" // دائما flex
                         type="button"
                     >
                         <MdLogout size={24} />
-                    </button>
-
-                    <button
-                        onClick={logout}
-                        className="btn btn-ghost btn-icon lg:hidden"
-                        type="button"
-                    >
-                        <MdLogout size={24} />
+                        <span className="hidden lg:inline">تسجيل الخروج</span> {/* النص يظهر فقط على lg */}
                     </button>
                 </div>
             </div>

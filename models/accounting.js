@@ -22,17 +22,21 @@ const accountingSchema = new mongoose.Schema({
         type: Number,
         default: 0
     },
-    charityAmount: { // 5% من الإيرادات كما هو محدد في الملخص
+    // الخيار المفضل: يتم تجميع هذا من المعاملات الفعلية لنوع 'charity_expense'
+    // وليس حسابًا تلقائيًا 5% من الإيرادات. هذا يوفر دقة أكبر للصدقات الفعلية.
+    charityExpenses: { // <--- تم تغيير الاسم ليكون أكثر دقة
         type: Number,
         default: 0
     },
+    // إذا أردت حساب 5% كنسبة من الإيرادات كهدف أو تقدير، يمكن إضافة حقل آخر
+    // estimatedCharityFromRevenue: { type: Number, default: 0 },
     netProfit: {
         type: Number,
         default: 0
     },
     // يمكن إضافة ملخصات أخرى هنا إذا لزم الأمر، مثل:
     // studentsCountBySubscription: { type: Map, of: Number, default: {} },
-    // trialConversionsCount: { type: Number, default: 0 },
+    // trialConversionsCount: { type: Number, default: {} },
     // detailedBreakdown: { type: Object, default: {} } // لتخزين تفصيلات أكثر إن لزم الأمر
 }, { timestamps: true });
 

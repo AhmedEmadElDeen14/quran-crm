@@ -1,333 +1,346 @@
 // client/src/pages/TeacherDashboard.js
 
-import React, { useEffect, useState, useContext, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate, useParams } from 'react-router-dom';
-import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import UpdateSessionModal from '../components/UpdateSessionModal'; // استيراد المودال الجديد
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import SummaryCard from '../components/SummaryCard';
+import UpdateSessionModal from '../components/UpdateSessionModal';
+import Loader from '../components/ui/Loader';
+import { useToast } from '../context/ToastContext';
+import { formatTime12Hour } from '../utils/timeHelpers';
 
 function TeacherDashboard() {
+    const { id } = useParams();
     const { user, logout } = useContext(AuthContext);
-    const { id: routeId } = useParams(); // المعرف من الرابط (لو فتح الادمن)
     const navigate = useNavigate();
+    const { showToast } = useToast();
+
+    // **NEW: Removed 'const teacherId = id || user?.teacherProfileId;' from here.**
+    // This variable will now be defined inside the useCallback.
 
 
-
-    // **أضف هذا الـ console.log في بداية المكون**
-    console.log("TeacherDashboard rendered.");
-    console.log("User object from AuthContext:", user); // للتحقق من User object
-    console.log("routeId from useParams:", routeId); // للتحقق من routeId
-
-
-    // استخدام teacherProfileId من الـ user إذا كان دور المعلم، وإلا استخدم id من الـ route (للأدمن)
-    const teacherId = routeId || user?.teacherProfileId;
-
-
-
-    // **أضف هذا الـ console.log للتحقق من قيمة teacherId النهائية**
-    console.log("Final teacherId calculated:", teacherId);
-
-
-
-    // حالات البيانات الرئيسية
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [summary, setSummary] = useState(null);
+    const [teacher, setTeacher] = useState(null);
     const [students, setStudents] = useState([]);
     const [sessionsToday, setSessionsToday] = useState([]);
-    const [reports, setReports] = useState([]);
-    const [notifications, setNotifications] = useState([]);
-    const [monthlyStats, setMonthlyStats] = useState([]);
-    const [teacherDetails, setTeacherDetails] = useState(null); // تفاصيل المعلم الشخصية
+    const [loading, setLoading] = useState(true);
+    const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+    const [selectedSession, setSelectedSession] = useState(null);
 
-    // حالات المودال لتحديث الحصص
-    const [showUpdateSessionModal, setShowUpdateSessionModal] = useState(false);
-    const [currentSessionToUpdate, setCurrentSessionToUpdate] = useState(null);
+    const [monthlySessionsChartData, setMonthlySessionsChartData] = useState([]);
 
-    // الدوال المساعدة (يمكن تركها خارج useCallback إذا كانت بسيطة ولا تعتمد على حالات متغيرة)
+    // **NEW: isTeacherView and isAdminView moved inside fetchTeacherData or redefined if needed here**
+    // For simplicity, let's keep them derived inside useCallback as needed
+    // Or if used outside frequently, define them with useMemo:
+    const isTeacherView = useMemo(() => user?.role === 'Teacher' && user?.userId === id, [user, id]);
+    const isAdminView = useMemo(() => user?.role === 'Admin' && id, [user, id]);
+
+
     const daysInArabic = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
     const getCurrentDayOfWeekArabic = () => {
-        const todayIndex = new Date().getDay(); // 0 = الأحد ... 6 = السبت
+        const todayIndex = new Date().getDay();
         return daysInArabic[todayIndex];
     };
     const todayDayName = getCurrentDayOfWeekArabic();
 
-
-    // Helper function to format 24hr time (e.g., "09:00") to 12hr (e.g., "9:00 ص")
-    const formatTime12Hour = (time24hrPart) => {
-        if (typeof time24hrPart !== 'string' || !time24hrPart.includes(':')) return '';
-        const [hours, minutes] = time24hrPart.split(':').map(Number);
-
-        if (isNaN(hours) || isNaN(minutes)) {
-            return 'وقت غير صالح';
-        }
-
-        const ampm = hours >= 12 ? 'م' : 'ص';
-        const formattedHours = hours % 12 || 12;
-        return `${formattedHours}:${minutes < 10 ? '0' : ''}${minutes} ${ampm}`;
-    };
-
-
-    // الدوال التي تجلب البيانات (يجب أن تكون معرفة بـ useCallback)
-    const fetchTeacherDetails = useCallback(async () => {
-        console.log("Attempting to fetch teacher details for ID:", teacherId); // <--- أضف هذا
+    const fetchTeacherData = useCallback(async () => {
+        setLoading(true);
         try {
-            const res = await axios.get(`http://localhost:5000/api/teachers/${teacherId}`, { //
-                headers: { Authorization: `Bearer ${user.token}` },
+            // **NEW: Define teacherIdToFetch inside the useCallback**
+            // This correctly captures 'id' and 'user' from the closure/dependencies
+            const teacherIdToFetch = id || user?.teacherProfileId;
+            console.log("Value of teacherIdToFetch:", teacherIdToFetch); // هذا سيخبرنا ما هي قيمة المعرف
+
+
+            if (!teacherIdToFetch) {
+                showToast('معرف المعلم غير موجود.', 'error');
+                setLoading(false);
+                return;
+            }
+
+            const config = { headers: { Authorization: `Bearer ${user.token}` } };
+
+            // 1. Fetch teacher details
+            const teacherRes = await axios.get(`/api/teacher/${teacherIdToFetch}`, config);
+            setTeacher(teacherRes.data);
+
+            // 2. Fetch students assigned to this teacher
+            const studentsRes = await axios.get(`/api/students?teacherId=${teacherIdToFetch}`, config);
+            const mappedStudents = studentsRes.data.map(s => {
+                const requiredSlotsCount = (s.subscriptionType && SUBSCRIPTION_DETAILS_FRONTEND[s.subscriptionType]?.monthlySlots) || 0;
+                const remaining = requiredSlotsCount - (s.sessionsCompletedThisPeriod || 0);
+
+                return {
+                    ...s,
+                    sessionsCompleted: s.sessionsCompletedThisPeriod || 0,
+                    absences: s.absencesThisPeriod || 0,
+                    remainingSlots: Math.max(0, remaining),
+                    requiredSlots: requiredSlotsCount
+                };
             });
-            console.log("Teacher details fetched successfully:", res.data); // <--- أضف هذا
-            setTeacherDetails(res.data);
-        } catch (err) {
-            console.error("Error fetching teacher details:", err.response?.data || err.message); // <--- أضف هذا
-            setError('فشل في جلب بيانات المعلم');
-        }
-    }, [user, teacherId]);
+            setStudents(mappedStudents);
 
-    const fetchSummary = useCallback(async () => {
-        try {
-            const res = await axios.get(`http://localhost:5000/api/teachers/${teacherId}/dashboard-summary`, {
-                headers: { Authorization: `Bearer ${user.token}` },
-            });
-            setSummary(res.data);
-        } catch (err) {
-            console.error("Error fetching dashboard summary:", err);
-            setError('فشل في جلب ملخص الأداء');
-        }
-    }, [user, teacherId]);
-
-    const fetchStudents = useCallback(async () => {
-        console.log("fetchStudents called for ID:", teacherId);
-        try {
-            const res = await axios.get(`http://localhost:5000/api/teachers/${teacherId}/students-details`, {
-                headers: { Authorization: `Bearer ${user.token}` },
-            });
-            console.log("API Response (Students Details):", res.data); // <--- أضف هذا
-            setStudents(res.data);
-        } catch (err) {
-            console.error("Error fetching students details:", err);
-            setError('فشل في جلب بيانات الطلاب');
-        }
-    }, [user, teacherId]);
-
-    const fetchSessionsByDay = useCallback(async () => {
-        try {
+            // 3. Fetch today's sessions for this teacher
             const dayOfWeek = getCurrentDayOfWeekArabic();
-            const res = await axios.get(`http://localhost:5000/api/teachers/${teacherId}/daily-sessions-by-day?dayOfWeek=${encodeURIComponent(dayOfWeek)}`, {
-                headers: { Authorization: `Bearer ${user.token}` },
-            });
-            setSessionsToday(res.data);
-        } catch (err) {
-            console.error("Error fetching daily sessions:", err);
-            setError('فشل في جلب الحصص اليومية');
-        }
-    }, [user, teacherId]);
+            const sessionsRes = await axios.get(`/api/sessions/teacher/${teacherIdToFetch}/today?dayOfWeek=${encodeURIComponent(dayOfWeek)}`, config);
+            setSessionsToday(sessionsRes.data);
 
-    const fetchReports = useCallback(async () => {
-        try {
-            const res = await axios.get(`http://localhost:5000/api/teachers/${teacherId}/sessions-reports`, {
-                headers: { Authorization: `Bearer ${user.token}` },
-            });
-            setReports(res.data);
-        } catch (err) {
-            console.error("Error fetching session reports:", err);
-            setError('فشل في جلب التقارير.');
-        }
-    }, [user, teacherId]);
+            // 4. Fetch actual monthly completed sessions for the chart
+            const monthlyStatsRes = await axios.get(`/api/teachers/${teacherIdToFetch}/monthly-sessions-summary`, config);
 
-    // Effect لمرة واحدة عند تحميل المكون أو تغير المستخدم/المعلم
-    useEffect(() => {
-        console.log("Main useEffect in TeacherDashboard triggered.");
-        if (user && teacherId) {
-            console.log("User and teacherId are present. Initiating data fetch.");
-            setLoading(true);
-            // استخدام Promise.all لجلب جميع البيانات في نفس الوقت
-            Promise.all([
-                fetchTeacherDetails(),
-                fetchSummary(),
-                fetchStudents(),
-                fetchSessionsByDay(),
-                fetchReports()
-            ])
-                .then(() => {
-                    console.log("All data fetched successfully.");
-                    setLoading(false);
-                    setError(''); // مسح الأخطاء إذا نجح الجلب
-                })
-                .catch((err) => {
-                    console.error("Error during initial data fetch:", err);
-                    setLoading(false);
-                    setError('حدث خطأ أثناء تحميل لوحة التحكم. يرجى المحاولة مرة أخرى.');
-                });
-        } else {
-            console.log("User or teacherId is missing. User:", user, "TeacherId:", teacherId);
+            const monthNames = [
+                'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+            ];
+            const formattedMonthlyStats = monthlyStatsRes.data.map(item => ({
+                name: monthNames[item.month - 1],
+                'عدد الحصص': item.totalSessions
+            }));
+            setMonthlySessionsChartData(formattedMonthlyStats);
+
+            showToast('تم تحميل بيانات لوحة تحكم المعلم بنجاح!', 'success');
+
+        } catch (err) {
+            console.error('Error fetching teacher dashboard data:', err.response?.data?.message || err.message);
+            showToast(err.response?.data?.message || 'فشل في تحميل لوحة تحكم المعلم.', 'error');
+            setTeacher(null);
+            setStudents([]);
+            setSessionsToday([]);
+            setMonthlySessionsChartData([]);
+        } finally {
             setLoading(false);
-            setError('لم يتم العثور على بيانات المستخدم أو معرف المعلم.');
         }
-    }, [user, teacherId, fetchTeacherDetails, fetchSummary, fetchStudents, fetchSessionsByDay, fetchReports]);
-    // يجب إضافة جميع الدوال المعتمدة على useCallback إلى مصفوفة التوابع هنا
+    }, [id, user, showToast]); // Dependencies for useCallback: id, user, showToast
 
-    // دالة لإنشاء الإشعارات (تعتمد على students state)
-    const generateNotifications = useCallback((studentsList) => {
-        const notes = [];
-        studentsList.forEach(student => {
-            if (student.isRenewalNeeded) {
-                notes.push({
-                    id: student._id,
-                    message: `الطالب ${student.name} يحتاج إلى تجديد الاشتراك.`,
-                    type: 'warning',
-                });
-            }
-            if (student.remainingSlots <= 1 && student.remainingSlots > 0) {
-                notes.push({
-                    id: student._id + '-slots',
-                    message: `الطالب <span class="math-inline">\{student\.name\} لديه حصص متبقية قليلة \(</span>{student.remainingSlots}).`,
-                    type: 'info',
-                });
-            }
-        });
-        setNotifications(notes);
-    }, []); // لا تعتمد على أي حالة متغيرة خارجها
 
-    // Effect لتوليد الإشعارات عند تغير قائمة الطلاب
+    const SUBSCRIPTION_DETAILS_FRONTEND = useMemo(() => ({
+        'نصف ساعة / 4 حصص': { monthlySlots: 4 },
+        'نصف ساعة / 8 حصص': { monthlySlots: 8 },
+        'ساعة / 4 حصص': { monthlySlots: 8 },
+        'ساعة / 8 حصص': { monthlySlots: 16 },
+        'مخصص': { monthlySlots: 12 },
+        'حلقة تجريبية': { monthlySlots: 1 },
+        'أخرى': { monthlySlots: 0 }
+    }), []);
+
+
     useEffect(() => {
-        if (students.length > 0) {
-            generateNotifications(students);
+        if (user?.token && (isTeacherView || isAdminView)) {
+            fetchTeacherData();
+        } else if (!user?.token) {
+            // AuthContext will handle redirection
+        } else {
+            setLoading(false);
+            showToast('غير مصرح لك بالوصول إلى هذه الصفحة أو معرف المعلم غير موجود.', 'error');
+            if (user?.role === 'Admin') {
+                navigate('/admin/teachers');
+            } else {
+                navigate('/login');
+            }
         }
-    }, [students, generateNotifications]);
+    }, [user, fetchTeacherData, isTeacherView, isAdminView, navigate, showToast]);
 
 
-    // دالة لتهيئة بيانات الرسم البياني (بيانات وهمية هنا)
-    const loadMonthlyStats = useCallback(() => {
-        const stats = [];
-        const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-        for (let i = 0; i < 12; i++) {
-            stats.push({
-                month: monthNames[i],
-                sessions: Math.floor(Math.random() * 30) + 5,
-                earnings: Math.floor(Math.random() * 4000) + 1000,
-            });
-        }
-        setMonthlyStats(stats);
-    }, []);
-
-    // Effect لتحميل إحصائيات الشهر
-    useEffect(() => {
-        loadMonthlyStats();
-    }, [loadMonthlyStats]);
-
-
-    // دالة لفتح مودال تحديث الحصة
-    const openUpdateSessionModal = (session) => {
-        setCurrentSessionToUpdate(session);
-        setShowUpdateSessionModal(true);
+    const handleUpdateSessionClick = (session) => {
+        setSelectedSession(session);
+        setIsUpdateModalOpen(true);
     };
 
+    const handleSessionUpdated = () => {
+        setIsUpdateModalOpen(false);
+        setSelectedSession(null);
+        fetchTeacherData();
+    };
 
-    // إذا لم يتم تحميل البيانات بعد أو حدث خطأ
+    const totalStudents = students.length;
+    const activeStudents = students.filter(s => !s.isArchived).length;
+    const trialStudents = students.filter(s => s.subscriptionType === 'حلقة تجريبية').length;
+    const fullSubscriptionStudents = students.filter(s => s.subscriptionType !== 'حلقة تجريبية' && s.subscriptionType !== 'أخرى').length;
+    const renewalNeededStudents = students.filter(s => s.isRenewalNeeded).length;
+
+    const notifications = students.filter(s => s.isRenewalNeeded || (s.remainingSlots !== undefined && s.remainingSlots <= 2 && s.remainingSlots > 0)).map(s => {
+        if (s.isRenewalNeeded) {
+            return {
+                id: s._id,
+                type: 'warning',
+                message: `الطالب ${s.name} يحتاج إلى تجديد الاشتراك!`,
+                action: () => navigate(`/admin/students/attendance-renewal`),
+            };
+        } else if (s.remainingSlots !== undefined && s.remainingSlots <= 2 && s.remainingSlots > 0) {
+            return {
+                id: s._id + '-slots',
+                type: 'info',
+                message: `الطالب ${s.name} لديه حصص متبقية قليلة ${s.remainingSlots}).`,
+                action: () => navigate(`/admin/students/edit/${s._id}`),
+            };
+        }
+        return null;
+    }).filter(Boolean);
+
+
     if (loading) {
-        return <div className="p-10 text-center text-gray-600 dark:text-gray-400">جاري التحميل...</div>;
-    }
-    if (error) {
-        return <div className="p-10 text-red-600 text-center">{error}</div>;
-    }
-    // إذا لم يتم العثور على تفاصيل المعلم
-    if (!teacherDetails) {
-        return <div className="p-10 text-red-600 text-center">لم يتم العثور على بيانات المعلم.</div>;
+        return (
+            <div className="flex justify-center items-center h-screen text-gray-600 dark:text-gray-400">
+                <Loader size={16} className="ml-2" />
+                جاري تحميل لوحة تحكم المعلم...
+            </div>
+        );
     }
 
+    if (!teacher) {
+        return (
+            <div className="page-layout text-center p-4 text-red-500 dark:text-red-400">
+                <h2 className="text-2xl font-bold mb-4">لم يتم العثور على بيانات المعلم.</h2>
+                <p>يرجى التأكد من أن المعرف صحيح أو أن لديك الصلاحيات اللازمة.</p>
+                {isAdminView && (
+                    <button onClick={() => navigate('/admin/teachers')} className="btn btn-primary mt-4">
+                        العودة لإدارة المعلمين
+                    </button>
+                )}
+            </div>
+        );
+    }
 
     return (
-        <div className="container mx-auto p-6 space-y-10 font-sans" dir="rtl">
-            {/* الملف الشخصي */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-gray-100">ملفي الشخصي</h2>
-                <div className="flex flex-col md:flex-row justify-between gap-6">
-                    <div className="text-lg text-gray-800 dark:text-gray-300">
-                        <p><span className="font-semibold">الاسم:</span> {teacherDetails.name || '---'}</p>
-                        <p><span className="font-semibold">العمر:</span> {teacherDetails.age || '---'}</p>
-                        <p><span className="font-semibold">رقم التواصل:</span> {teacherDetails.contactNumber || '---'}</p>
-                        <p><span className="font-semibold">رابط Zoom:</span> <a href={teacherDetails.zoomLink} target="_blank" rel="noreferrer" className="text-blue-600 underline">{teacherDetails.zoomLink}</a></p>
-                    </div>
+        <div className="teacher-dashboard page-layout" dir="rtl">
+            <header className="flex items-center justify-between mb-6 border-b pb-4 border-gray-200 dark:border-gray-700">
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                    لوحة تحكم المعلم: {teacher.name}
+                </h1>
+                {isAdminView && (
+                    <button onClick={() => navigate('/admin/teachers')} className="btn btn-secondary btn-sm">
+                        العودة لإدارة المعلمين
+                    </button>
+                )}
+            </header>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <SummaryCard title="إجمالي الطلاب" value={totalStudents} type="total" />
+                <SummaryCard title="طلاب نشطون" value={activeStudents} type="active" />
+                <SummaryCard title="طلاب تجريبيون" value={trialStudents} type="students" />
+                <SummaryCard title="طلاب اشتراك كامل" value={fullSubscriptionStudents} type="available" />
+                <SummaryCard title="طلاب بحاجة لتجديد" value={renewalNeededStudents} type="warning" />
+                <SummaryCard title="حصص اليوم" value={sessionsToday.length} type="info" />
+                <SummaryCard title="إجمالي حصص الشهر" value={teacher.currentMonthSessions || 0} type="total" />
+                <SummaryCard title="الأرباح التقديرية هذا الشهر" value={`${(teacher.currentMonthSessions * 15).toFixed(2)} جنيه`} type="success" />
+            </div>
+
+            {/* Notifications */}
+            {notifications.length > 0 && (
+                <div className="card bg-yellow-50 dark:bg-yellow-900 p-4 rounded-lg shadow mb-8">
+                    <h3 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-2">إشعارات هامة:</h3>
+                    <ul className="list-disc list-inside text-yellow-700 dark:text-yellow-300">
+                        {notifications.map(notif => (
+                            <li key={notif.id} className="mb-1">
+                                {notif.message}{' '}
+                                {notif.action && (
+                                    <button onClick={notif.action} className="text-blue-600 hover:underline text-sm mr-2">
+                                        عرض التفاصيل
+                                    </button>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
                 </div>
-            </section>
+            )}
 
-            {/* ملخص الأداء الشهري */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">ملخص الأداء الشهري</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                    <div className="bg-green-100 dark:bg-green-900 p-4 rounded-lg shadow">
-                        <p className="text-green-700 dark:text-green-300 font-semibold">عدد الطلاب النشطين</p>
-                        <p className="text-3xl font-bold text-green-800 dark:text-green-400">{summary?.activeStudentsCount ?? 0}</p>
-                    </div>
-                    <div className="bg-blue-100 dark:bg-blue-900 p-4 rounded-lg shadow">
-                        <p className="text-blue-700 dark:text-blue-300 font-semibold">عدد الحصص المكتملة</p>
-                        <p className="text-3xl font-bold text-blue-800 dark:text-blue-400">{summary?.completedMonthlySessions ?? 0}</p>
-                    </div>
-                    <div className="bg-yellow-100 dark:bg-yellow-900 p-4 rounded-lg shadow">
-                        <p className="text-yellow-700 dark:text-yellow-300 font-semibold">الإيرادات المتوقعة (جنيه)</p>
-                        <p className="text-3xl font-bold text-yellow-800 dark:text-yellow-400">{summary?.estimatedEarningsBasedOnSessions?.toFixed(2) ?? '0.00'}</p>
-                    </div>
-                    <div className="bg-purple-100 dark:bg-purple-900 p-4 rounded-lg shadow">
-                        <p className="text-purple-700 dark:text-purple-300 font-semibold">الراتب المدفوع هذا الشهر (جنيه)</p>
-                        <p className="text-3xl font-bold text-purple-800 dark:text-purple-400">{summary?.totalSalaryPaidToTeacherThisMonth?.toFixed(2) ?? '0.00'}</p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                            آخر دفعة: {teacherDetails?.financialDetails?.lastPaymentDate ? new Date(teacherDetails.financialDetails.lastPaymentDate).toLocaleDateString('ar-EG') : 'لا يوجد'}
-                        </p>
-                    </div>
-                </div>
-            </section>
-
-            {/* الإحصائيات الشهرية والسنوية */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">الإحصائيات الشهرية والسنوية</h2>
-                <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={monthlyStats} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
-                        <YAxis yAxisId="right" orientation="right" stroke="#82ca9d" />
-                        <Tooltip />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line yAxisId="left" type="monotone" dataKey="sessions" stroke="#8884d8" activeDot={{ r: 8 }} />
-                        <Line yAxisId="right" type="monotone" dataKey="earnings" stroke="#82ca9d" />
-                    </LineChart>
-                </ResponsiveContainer>
-            </section>
-
-            {/* قائمة الطلاب المشتركين */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">قائمة الطلاب المشتركين</h2>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full border-collapse border border-gray-300 dark:border-gray-600">
-                        <thead className="bg-gray-100 dark:bg-gray-700">
-                            <tr>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-right">الاسم</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">نوع الاشتراك</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">المواعيد الأسبوعية</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">الحصص المكتملة</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">الغياب</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">حالة الدفع</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">يحتاج تجديد؟</th>
-                                <th className="border border-gray-300 dark:border-gray-600 p-2 text-center">إجراءات</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {students.length === 0 ? (
+            {/* Today's Sessions Table */}
+            <div className="card p-6 bg-white dark:bg-gray-800 shadow-lg rounded-lg mb-8">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 pb-2 border-b border-gray-300 dark:border-gray-600">
+                    حصص اليوم ({new Date().toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long' })})
+                </h3>
+                {sessionsToday.length === 0 ? (
+                    <p className="text-center italic text-gray-500 dark:text-gray-400">لا توجد حصص مجدولة لهذا المعلم اليوم.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="data-table w-full">
+                            <thead className="bg-gray-100 dark:bg-gray-700">
                                 <tr>
-                                    <td colSpan="8" className="text-center p-4 text-gray-500 dark:text-gray-400">لا يوجد طلاب مسجلين</td>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الطالب</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الوقت</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الحالة</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">النوع</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الإجراءات</th>
                                 </tr>
-                            ) : (
-                                students.map(student => (
-                                    <tr key={student._id} className="odd:bg-gray-50 even:bg-white dark:odd:bg-gray-700 dark:even:bg-gray-800">
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-right">{student.name}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">{student.subscriptionType}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">
+                            </thead>
+                            <tbody>
+                                {sessionsToday.map(session => (
+                                    <tr key={session._id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700">
+                                        <td className="text-center">{session.studentId?.name || 'طالب محذوف'}</td>
+                                        <td className="text-center">{formatTime12Hour(session.timeSlot.split(' - ')[0])}</td>
+                                        <td className="text-center">{session.status}</td>
+                                        <td className="text-center">{session.isTrial ? 'تجريبية' : 'عادية'}</td>
+                                        <td className="text-center">
+                                            <button onClick={() => handleUpdateSessionClick(session)} className="btn btn-sm btn-primary">
+                                                تحديث الحالة
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Monthly Sessions Chart */}
+            <div className="card p-6 bg-white dark:bg-gray-800 shadow-lg rounded-lg mb-8">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 pb-2 border-b border-gray-300 dark:border-gray-600">
+                    عدد الحصص الشهرية المكتملة
+                </h3>
+                {monthlySessionsChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={monthlySessionsChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip />
+                            <Legend />
+                            <Bar dataKey="عدد الحصص" fill="#8884d8" />
+                        </BarChart>
+                    </ResponsiveContainer>
+                ) : (
+                    <p className="text-center italic text-gray-500 dark:text-gray-400">لا توجد بيانات حصص شهرية لعرضها.</p>
+                )}
+            </div>
+
+            {/* Students List - Updated to show more details */}
+            <div className="card p-6 bg-white dark:bg-gray-800 shadow-lg rounded-lg">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-4 pb-2 border-b border-gray-300 dark:border-gray-600">
+                    قائمة الطلاب المرتبطين
+                </h3>
+                {students.length === 0 ? (
+                    <p className="text-center italic text-gray-500 dark:text-gray-400">لا يوجد طلاب مرتبطون بهذا المعلم.</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="data-table w-full">
+                            <thead className="bg-gray-100 dark:bg-gray-700">
+                                <tr>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الاسم</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">رقم الهاتف</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">نوع الاشتراك</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">المواعيد الأسبوعية</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">حصص مكتملة</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">حصص متبقية</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">غيابات</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">يحتاج تجديد؟</th>
+                                    <th className="text-center text-gray-900 dark:text-gray-100">الإجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {students.map(student => (
+                                    <tr key={student._id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700">
+                                        <td className="text-center">{student.name}</td>
+                                        <td className="text-center">{student.phone}</td>
+                                        <td className="text-center">{student.subscriptionType}</td>
+                                        <td className="text-center">
                                             {student.scheduledAppointments && student.scheduledAppointments.length > 0 ? (
                                                 <div className="flex flex-col items-center">
-                                                    {student.scheduledAppointments.map((sa, index) => (
-                                                        <span key={index} className="whitespace-nowrap py-0.5 text-sm">
-                                                            {sa.dayOfWeek} : {formatTime12Hour(sa.timeSlot.split(' - ')[0])}
+                                                    {student.scheduledAppointments.map((appt, idx) => (
+                                                        <span key={idx} className="whitespace-nowrap">
+                                                            {appt.dayOfWeek} {formatTime12Hour(appt.timeSlot.split(' - ')[0])}
                                                         </span>
                                                     ))}
                                                 </div>
@@ -335,124 +348,30 @@ function TeacherDashboard() {
                                                 'لا يوجد'
                                             )}
                                         </td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">{student.sessionsCompleted} / {student.requiredSlots}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">{student.absences || 0}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">{student.paymentStatus}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">{student.isRenewalNeeded ? 'نعم' : 'لا'}</td>
-                                        <td className="border border-gray-300 dark:border-gray-600 p-2 text-center">
-                                            {/* أزرار الإجراءات */}
-                                            <button
-                                                onClick={() => alert(`عرض تقارير الطالب ${student.name} (غير مفعل حالياً)`)}
-                                                className="btn btn-secondary btn-sm ml-2"
-                                            >
-                                                تقارير الطالب
+                                        <td className="text-center">{student.sessionsCompleted || 0}</td>
+                                        <td className="text-center">{student.remainingSlots !== undefined ? student.remainingSlots : 'N/A'}</td>
+                                        <td className="text-center">{student.absences || 0}</td>
+                                        <td className="text-center">{student.isRenewalNeeded ? 'نعم' : 'لا'}</td>
+                                        <td className="text-center">
+                                            <button onClick={() => navigate(`/admin/students/edit/${student._id}`)} className="btn btn-sm btn-info">
+                                                عرض/تعديل
                                             </button>
                                         </td>
                                     </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            {/* حصص اليوم */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">حصص اليوم ({todayDayName})</h2>
-                {sessionsToday.length === 0 ? (
-                    <p className="text-center text-gray-500 dark:text-gray-400">لا توجد حصص مجدولة لهذا اليوم.</p>
-                ) : (
-                    <div className="space-y-4"> {/* استخدام space-y-4 للفصل بين الحصص */}
-                        {sessionsToday.map(session => (
-                            <div key={session._id} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-700 shadow-sm">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3">
-                                    <h3 className="font-bold text-xl text-gray-900 dark:text-gray-100">الطالب: {session.studentId.name}</h3>
-                                    <span className={`px-3 py-1 rounded-full text-sm font-medium ${session.status === 'مجدولة' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' :
-                                        session.status === 'حضَر' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
-                                            session.status === 'غاب' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' :
-                                                'bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200'
-                                        }`}>
-                                        الحالة: {session.status}
-                                    </span>
-                                </div>
-                                <div className="text-gray-700 dark:text-gray-300 text-sm space-y-1">
-                                    <p><strong>نوع الاشتراك:</strong> {session.studentId.subscriptionType}</p>
-                                    <p><strong>الوقت:</strong> {formatTime12Hour(session.timeSlot.split(' - ')[0])} - {formatTime12Hour(session.timeSlot.split(' - ')[1])}</p>
-                                </div>
-                                {session.report && session.status === 'حضَر' && (
-                                    <div className="mt-3 p-3 bg-gray-100 dark:bg-gray-600 rounded-md text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                                        <strong>التقرير:</strong> {session.report}
-                                    </div>
-                                )}
-                                <div className="mt-4 flex flex-col sm:flex-row gap-3">
-                                    <button
-                                        onClick={() => openUpdateSessionModal(session)}
-                                        className="btn btn-primary btn-sm w-full sm:w-auto"
-                                    >
-                                        تسجيل الحضور/الغياب
-                                    </button>
-                                    <button
-                                        onClick={() => alert(`عرض تقارير الطالب ${session.studentId.name} (غير مفعل حالياً)`)}
-                                        className="btn btn-secondary btn-sm w-full sm:w-auto"
-                                    >
-                                        تقارير الطالب
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
-            </section>
+            </div>
 
-            {/* التقارير والملاحظات */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">التقارير والملاحظات</h2>
-                {reports.length === 0 ? (
-                    <p className="text-center text-gray-500 dark:text-gray-400">لا توجد تقارير متاحة</p>
-                ) : (
-                    <ul className="divide-y divide-gray-300 dark:divide-gray-700 max-h-48 overflow-y-auto">
-                        {reports.map(session => (
-                            <li key={session._id} className="py-3">
-                                <p className="font-semibold text-lg text-gray-800 dark:text-gray-200">{session.studentId.name}</p>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-wrap">{session.report}</p>
-                                <p className="text-xs text-gray-400 mt-1">{new Date(session.date).toLocaleDateString('ar-EG')}</p>
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </section>
-
-            {/* الإشعارات والتنبيهات */}
-            <section className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-                <h2 className="text-2xl font-bold mb-6 text-gray-900 dark:text-gray-100">الإشعارات والتنبيهات</h2>
-                {notifications.length === 0 ? (
-                    <p className="text-center text-gray-500 dark:text-gray-400">لا توجد إشعارات جديدة</p>
-                ) : (
-                    <ul className="divide-y divide-gray-300 dark:divide-gray-700">
-                        {notifications.map(note => (
-                            <li key={note.id} className={`py-3 px-4 rounded mb-2 ${note.type === 'warning' ? 'bg-yellow-100 dark:bg-yellow-700 text-yellow-800 dark:text-yellow-200' :
-                                note.type === 'info' ? 'bg-blue-100 dark:bg-blue-700 text-blue-800 dark:text-blue-200' : ''
-                                }`}>
-                                {note.message}
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </section>
-
-            {/* استخدام مكون المودال الجديد لتحديث حالة الحصة */}
-            {showUpdateSessionModal && currentSessionToUpdate && (
-                <UpdateSessionModal
-                    isOpen={showUpdateSessionModal}
-                    onClose={() => setShowUpdateSessionModal(false)}
-                    session={currentSessionToUpdate}
-                    onSessionUpdated={() => {
-                        fetchSessionsByDay();
-                        fetchSummary();
-                    }}
-                    userToken={user.token}
-                />
-            )}
+            <UpdateSessionModal
+                isOpen={isUpdateModalOpen}
+                onClose={() => setIsUpdateModalOpen(false)}
+                session={selectedSession}
+                onSessionUpdated={handleSessionUpdated}
+                userToken={user?.token}
+            />
         </div>
     );
 }

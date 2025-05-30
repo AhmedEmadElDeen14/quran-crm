@@ -4,13 +4,16 @@ import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Button from '../components/ui/Button';
+import Loader from '../components/ui/Loader'; // NEW: Import Loader
+import { useToast } from '../context/ToastContext'; // NEW: Import useToast
 
 function FinancialReportsPage() {
     const [financialData, setFinancialData] = useState(null);
-    const [error, setError] = useState('');
+    // const [error, setError] = useState(''); // No longer needed, use toast
     const [loading, setLoading] = useState(true);
     const { user } = useContext(AuthContext);
     const navigate = useNavigate();
+    const { showToast } = useToast(); // Use the new toast hook
 
     // حالة لتحديد الشهر والسنة للتقرير
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1); // الشهر الحالي (1-12)
@@ -18,21 +21,21 @@ function FinancialReportsPage() {
 
     const fetchMonthlySummary = async (year, month) => {
         setLoading(true);
-        setError('');
+        // setError(''); // No longer needed
         try {
             const config = { headers: { Authorization: `Bearer ${user.token}` } };
-            // هذا هو السطر الصحيح الذي يجب أن يكون في FinancialReportsPage.js
-            // يضمن أن البارامترات (year, month) نظيفة وخالية من أي HTML أو تكرارات
             const params = new URLSearchParams({
-                year: String(year), // تحويل year إلى نص لضمان النظافة والتوافق
-                month: String(month).padStart(2, '0') // تحويل month إلى نص من رقمين لضمان النظافة والتوافق
+                year: String(year),
+                month: String(month).padStart(2, '0')
             }).toString();
 
             const response = await axios.get(`http://localhost:5000/api/finance/reports/monthly-summary?${params}`, config);
             setFinancialData(response.data);
+            showToast(`تم جلب التقرير المالي لشهر ${monthNames[month - 1]} ${year} بنجاح!`, 'success'); // NEW: Toast success
         } catch (err) {
             console.error('Error fetching financial reports:', err.response?.data?.message || err.message);
-            setError(err.response?.data?.message || 'فشل في جلب بيانات التقارير المالية.');
+            // setError(err.response?.data?.message || 'فشل في جلب بيانات التقارير المالية.'); // No longer needed
+            showToast(err.response?.data?.message || 'فشل في جلب بيانات التقارير المالية.', 'error'); // NEW: Toast error
             setFinancialData(null);
         } finally {
             setLoading(false);
@@ -42,6 +45,8 @@ function FinancialReportsPage() {
     useEffect(() => {
         if (user?.token) {
             // جلب تقرير الشهر السابق عند التحميل الأولي لضمان وجود بيانات مجمعة
+            // هذا المنطق يجلب الشهر السابق، وهو مفيد إذا كان الـ cron job يعمل في بداية الشهر
+            // ويلخص بيانات الشهر المنصرم.
             const date = new Date();
             let month = date.getMonth(); // 0-11
             let year = date.getFullYear();
@@ -57,7 +62,7 @@ function FinancialReportsPage() {
             setSelectedYear(year);
             fetchMonthlySummary(year, month);
         }
-    }, [user]);
+    }, [user, showToast]); // Added showToast to dependencies
 
     const handleFetchReport = () => {
         fetchMonthlySummary(selectedYear, selectedMonth);
@@ -69,13 +74,14 @@ function FinancialReportsPage() {
     ];
 
     const currentYear = new Date().getFullYear();
-    const years = Array.from({ length: 5 }, (_, i) => currentYear - i); // آخر 5 سنوات
+    // Generates an array of years for the dropdown (e.g., current year and past 4 years)
+    const years = Array.from({ length: 5 }, (_, i) => currentYear - i);
 
     const chartData = financialData ? [
         { name: 'الإيرادات', قيمة: financialData.totalRevenue },
-        { name: 'المصروفات', قيمة: financialData.totalExpenses },
+        { name: 'المصروفات العامة', قيمة: financialData.totalExpenses }, // NEW: Changed name to reflect general expenses
         { name: 'الرواتب المدفوعة', قيمة: financialData.totalSalariesPaid },
-        { name: 'الصدقة (5%)', قيمة: financialData.charityAmount },
+        { name: 'مصروفات الصدقة', قيمة: financialData.charityExpenses }, // NEW: Changed name to charityExpenses
         { name: 'صافي الربح', قيمة: financialData.netProfit },
     ] : [];
 
@@ -88,11 +94,11 @@ function FinancialReportsPage() {
                 </Button>
             </header>
 
-            {error && (
+            {/* {error && ( // No longer using direct error display, relying on toast
                 <div className="alert alert-error mb-4">
                     <span>{error}</span>
                 </div>
-            )}
+            )} */}
 
             <div className="card p-6 mb-6 bg-white dark:bg-gray-800 shadow-lg rounded-lg flex flex-wrap gap-4 items-end">
                 <div className="form-control">
@@ -125,7 +131,10 @@ function FinancialReportsPage() {
             </div>
 
             {loading ? (
-                <div className="text-center p-8 text-gray-600 dark:text-gray-400">جاري تحميل التقرير...</div>
+                <div className="flex justify-center items-center p-8 text-gray-600 dark:text-gray-400">
+                    <Loader size={16} className="ml-2" />
+                    جاري تحميل التقرير...
+                </div>
             ) : financialData ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="card p-6 bg-white dark:bg-gray-800 shadow-lg rounded-lg">
@@ -138,7 +147,7 @@ function FinancialReportsPage() {
                                 <span className="font-bold">{financialData.totalRevenue?.toFixed(2) || '0.00'} جنيه</span>
                             </p>
                             <p className="flex justify-between items-center text-red-700 dark:text-red-300">
-                                <span className="font-medium">إجمالي المصروفات:</span>
+                                <span className="font-medium">إجمالي المصروفات العامة:</span> {/* NEW: Changed text */}
                                 <span className="font-bold">{financialData.totalExpenses?.toFixed(2) || '0.00'} جنيه</span>
                             </p>
                             <p className="flex justify-between items-center text-blue-700 dark:text-blue-300">
@@ -146,8 +155,8 @@ function FinancialReportsPage() {
                                 <span className="font-bold">{financialData.totalSalariesPaid?.toFixed(2) || '0.00'} جنيه</span>
                             </p>
                             <p className="flex justify-between items-center text-purple-700 dark:text-purple-300">
-                                <span className="font-medium">مبلغ الصدقة (5%):</span>
-                                <span className="font-bold">{financialData.charityAmount?.toFixed(2) || '0.00'} جنيه</span>
+                                <span className="font-medium">مصروفات الصدقة:</span> {/* NEW: Changed text and field */}
+                                <span className="font-bold">{financialData.charityExpenses?.toFixed(2) || '0.00'} جنيه</span>
                             </p>
                             <p className={`flex justify-between items-center font-bold text-2xl pt-4 border-t border-gray-300 dark:border-gray-600 ${financialData.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 <span>صافي الربح:</span>

@@ -6,11 +6,11 @@ const AccountingSummary = require('../models/accounting');
 
 // وظيفة لتجميع وتحديث الملخص المحاسبي الشهري
 const updateMonthlyAccountingSummary = async (year, month) => {
-    const monthString = `${year}-${String(month).padStart(2, '0')}`;
+    const monthString = `${year}\-${String(month).padStart(2, '0')}`;
     const startDate = new Date(year, month - 1, 1); // الشهر في JavaScript يبدأ من 0 (يناير = 0)
     const endDate = new Date(year, month, 0, 23, 59, 59); // آخر يوم في الشهر
 
-    console.log(`Running monthly accounting summary update for ${monthString}...`);
+    console.log(`Running monthly accounting summary update for ${monthString} from ${startDate.toISOString()} to ${endDate.toISOString()}...`);
 
     try {
         // تجميع الإيرادات
@@ -36,8 +36,8 @@ const updateMonthlyAccountingSummary = async (year, month) => {
             {
                 $match: {
                     date: { $gte: startDate, $lte: endDate },
-                    type: { $in: ['system_expense', 'advertisement_expense', 'charity_expense', 'other_expense'] },
-                    status: { $in: ['paid', 'partial'] } // المصروفات التي تم دفعها
+                    type: { $in: ['system_expense', 'advertisement_expense', 'other_expense'] }, // <--- تم إزالة 'charity_expense'
+                    status: { $in: ['paid', 'partial'] }
                 }
             },
             {
@@ -47,7 +47,9 @@ const updateMonthlyAccountingSummary = async (year, month) => {
                 }
             }
         ]);
-        const totalExpenses = totalExpensesResult.length > 0 ? totalExpensesResult[0].totalAmount : 0;
+        // NEW: يتم الآن فصل المصروفات العامة عن مصروفات الصدقة
+        const generalExpenses = totalExpensesResult.length > 0 ? totalExpensesResult[0].totalAmount : 0;
+
 
         // تجميع رواتب المعلمين والمشرفين
         const totalSalariesPaidResult = await Transaction.aggregate([
@@ -55,7 +57,7 @@ const updateMonthlyAccountingSummary = async (year, month) => {
                 $match: {
                     date: { $gte: startDate, $lte: endDate },
                     type: 'salary_payment',
-                    status: { $in: ['paid', 'partial'] } // الرواتب التي تم دفعها
+                    status: { $in: ['paid', 'partial'] }
                 }
             },
             {
@@ -67,7 +69,7 @@ const updateMonthlyAccountingSummary = async (year, month) => {
         ]);
         const totalSalariesPaid = totalSalariesPaidResult.length > 0 ? totalSalariesPaidResult[0].totalAmount : 0;
 
-        // تجميع مبلغ الصدقة من المعاملات المدخلة يدوياً
+        // تجميع مبلغ الصدقة من المعاملات المدخلة يدوياً (الآن يطابق الاسم الجديد في النموذج)
         const totalCharityExpensesResult = await Transaction.aggregate([
             {
                 $match: {
@@ -83,23 +85,24 @@ const updateMonthlyAccountingSummary = async (year, month) => {
                 }
             }
         ]);
-        const charityAmount = totalCharityExpensesResult.length > 0 ? totalCharityExpensesResult[0].totalAmount : 0;
-
+        const charityExpenses = totalCharityExpensesResult.length > 0 ? totalCharityExpensesResult[0].totalAmount : 0; // <--- تم تغيير الاسم هنا
 
         // حساب صافي الربح
-        const netProfit = totalRevenue - (totalExpenses + totalSalariesPaid + charityAmount);
+        // صافي الربح = الإيرادات - (المصروفات العامة + الرواتب المدفوعة + مصروفات الصدقة)
+        const netProfit = totalRevenue - (generalExpenses + totalSalariesPaid + charityExpenses); // <--- تم تغيير المتغير هنا
+
 
         // تحديث أو إنشاء سجل AccountingSummary
         await AccountingSummary.findOneAndUpdate(
             { month: monthString },
             {
                 totalRevenue,
-                totalExpenses,
+                totalExpenses: generalExpenses, // <--- حفظ المصروفات العامة كـ totalExpenses
                 totalSalariesPaid,
-                charityAmount,
+                charityExpenses, // <--- حفظ مصروفات الصدقة بالاسم الجديد
                 netProfit
             },
-            { upsert: true, new: true } // upsert سينشئ المستند إذا لم يكن موجوداً
+            { upsert: true, new: true }
         );
         console.log(`Monthly accounting summary for ${monthString} updated/created successfully.`);
 
@@ -109,7 +112,6 @@ const updateMonthlyAccountingSummary = async (year, month) => {
 };
 
 // جدولة المهمة للتشغيل في اليوم الأول من كل شهر، الساعة 00:30 (بعد إعادة تعيين حصص الطلاب)
-// التعبير "30 0 1 * *" يعني: الدقيقة 30، الساعة 0 (منتصف الليل)، اليوم 1 من الشهر، أي شهر، أي يوم من الأسبوع.
 const startAccountingScheduler = () => {
     cron.schedule('30 0 1 * *', async () => {
         const now = new Date();
@@ -118,10 +120,9 @@ const startAccountingScheduler = () => {
 
         // نقوم بتشغيل التجميع للشهر السابق لضمان أن جميع معاملات الشهر قد اكتملت
         // وإذا كان الشهر 0 (يناير)، نأخذ ديسمبر من العام السابق
-        let monthToSummarize = targetMonth === 0 ? 12 : targetMonth; // إذا كان يناير، نأخذ ديسمبر (12)
-        let yearToSummarize = targetMonth === 0 ? targetYear - 1 : targetYear; // إذا كان يناير، نأخذ العام السابق
+        let monthToSummarize = targetMonth === 0 ? 12 : targetMonth;
+        let yearToSummarize = targetMonth === 0 ? targetYear - 1 : targetYear;
 
-        // هذه الدالة ستقوم بتجميع بيانات الشهر الذي انتهى للتو
         await updateMonthlyAccountingSummary(yearToSummarize, monthToSummarize);
     }, {
         scheduled: true,
@@ -131,7 +132,9 @@ const startAccountingScheduler = () => {
 
     // يمكن تشغيلها مرة واحدة عند بدء التطبيق للاختبار (أزل التعليق للاختبار)
     // const now = new Date();
-    // updateMonthlyAccountingSummary(now.getFullYear(), now.getMonth());
+    // const currentMonth = now.getMonth() + 1; // 1-12
+    // const currentYear = now.getFullYear();
+    // updateMonthlyAccountingSummary(currentYear, currentMonth); // لتشغيلها للشهر الحالي
 };
 
 module.exports = { startAccountingScheduler, updateMonthlyAccountingSummary };
