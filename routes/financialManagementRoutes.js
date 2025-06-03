@@ -4,10 +4,11 @@ const express = require('express');
 const router = express.Router();
 const Transaction = require('../models/transaction');
 const AccountingSummary = require('../models/accounting'); // استيراد نموذج الملخص المحاسبي
-const Student = require('../models/student');
-const Teacher = require('../models/teacher');
+const Student = require('../models/student'); // تأكد من استيراد نموذج الطالب
+const Teacher = require('../models/teacher'); // تأكد من استيراد نموذج المعلم
 const { protect, admin } = require('../middleware/authMiddleware');
-const mongoose = require('mongoose'); // استيراد mongoose للتحقق من ObjectId
+const mongoose = require('mongoose');
+const accountingScheduler = require('../cron/accountingScheduler');
 
 // POST /api/finance/transactions - إضافة حركة مالية جديدة
 router.post('/transactions', protect, admin, async (req, res) => {
@@ -50,9 +51,6 @@ router.post('/transactions', protect, admin, async (req, res) => {
                 student.paymentDetails.status = status;
                 student.paymentDetails.amount = amount;
                 student.paymentDetails.date = savedTransaction.date;
-                // لا نعدل sessionsCompletedThisPeriod أو isRenewalNeeded هنا
-                // لأن هذه الحقول تُعاد تعيينها بواسطة Cron Job (renewalChecker)
-                // أو عند تجديد الاشتراك الفعلي عبر مسار التجديد.
                 await student.save();
             }
         }
@@ -60,7 +58,7 @@ router.post('/transactions', protect, admin, async (req, res) => {
         if (entityType === 'Teacher' && type === 'salary_payment' && savedTransaction.entityId) {
             const teacher = await Teacher.findById(savedTransaction.entityId);
             if (teacher) {
-                teacher.financialDetails.lastPaymentDate = savedTransaction.date; // استخدام تاريخ المعاملة
+                teacher.financialDetails.lastPaymentDate = savedTransaction.date;
                 await teacher.save();
             }
         }
@@ -95,11 +93,26 @@ router.get('/transactions', protect, admin, async (req, res) => {
     }
 
     try {
+        // الخطوة 1: جلب جميع الحركات المالية المطابقة للفلتر بدون populate
         const transactions = await Transaction.find(filter)
-            .populate('entityId', 'name subscriptionType phone')
             .sort({ date: -1 });
 
-        res.json(transactions);
+        // الخطوة 2: فصل الحركات التي تحتاج إلى populate عن غيرها
+        const transactionsToPopulate = transactions.filter(t => t.entityType === 'Student' || t.entityType === 'Teacher');
+        const systemExpenseTransactions = transactions.filter(t => t.entityType === 'SystemExpense');
+
+        // الخطوة 3: تطبيق populate فقط على الحركات التي تحتاج إليها
+        // نستخدم populate كدالة مساعدة هنا لتجنب المشكلة
+        await Transaction.populate(transactionsToPopulate, {
+            path: 'entityId',
+            select: 'name' // جلب الاسم فقط (المشترك بين الطالب والمعلم)
+        });
+
+        // الخطوة 4: دمج النتائج مرة أخرى وفرزها حسب التاريخ
+        // (إذا كانت هناك حاجة لعرض subscriptionType أو phone، يجب معالجتها في الواجهة الأمامية)
+        const finalTransactions = [...transactionsToPopulate, ...systemExpenseTransactions].sort((a, b) => b.date - a.date);
+
+        res.json(finalTransactions);
     } catch (err) {
         console.error('خطأ في جلب الحركات المالية:', err);
         res.status(500).json({ message: 'فشل في جلب الحركات المالية.' });
@@ -146,8 +159,8 @@ router.put('/transactions/:id', protect, admin, async (req, res) => {
         if (transaction.entityType === 'Student' && transaction.type === 'subscription_payment' && transaction.entityId) {
             const student = await Student.findById(transaction.entityId);
             if (student) {
-                student.paymentDetails.status = transaction.status;
-                student.paymentDetails.amount = transaction.amount;
+                student.paymentDetails.status = status;
+                student.paymentDetails.amount = amount;
                 student.paymentDetails.date = transaction.date;
                 await student.save();
             }
@@ -237,5 +250,46 @@ router.get('/reports/monthly-summary', protect, admin, async (req, res) => {
         res.status(500).json({ message: 'فشل في جلب التقرير الشهري.' });
     }
 });
+
+
+// NEW ROUTE: POST /api / finance / reports / trigger - monthly - summary
+// @desc    تشغيل يدوي لمهمة تجميع الملخص المحاسبي الشهري (لشهر معين أو الشهر السابق)
+// @access  Admin
+router.post('/reports/trigger-monthly-summary', protect, admin, async (req, res) => {
+    const { year, month } = req.body; // يمكن أن نطلب الشهر والسنة يدوياً
+
+    try {
+        // تحديد الشهر والسنة المستهدف للتجميع
+        let targetYear = year;
+        let targetMonth = month; // الشهر من 1-12
+
+        if (!targetYear || !targetMonth) {
+            // إذا لم يتم تحديد الشهر والسنة، نجمع للشهر السابق (كما يفعل الـ cron job)
+            const now = new Date();
+            targetMonth = now.getMonth(); // فهرس الشهر الحالي (0-11)
+            targetYear = now.getFullYear();
+
+            if (targetMonth === 0) { // لو كان يناير
+                targetMonth = 12; // ديسمبر
+                targetYear--;
+            }
+            // وإلا، الشهر السابق هو (targetMonth) كما هو (مع تحويله إلى 1-12 لاحقاً)
+        }
+        // يجب تحويل targetMonth إلى فهرس (0-11) قبل استخدامه في Date constructor
+        // ولكن دالة calculateAndSaveSummary تتوقع 1-12، لذلك نمررها مباشرة.
+
+        // استدعاء دالة التجميع من cron/accountingScheduler.js
+        // يجب التأكد من أن accountingScheduler.js يقوم بتصدير calculateAndSaveSummary
+        // أو أننا نقوم باستدعاء الدالة الرئيسية ثم نمرر القيم.
+        // الأفضل هو استيراد calculateAndSaveSummary مباشرة إذا كانت مُصدرة.
+        await accountingScheduler.calculateAndSaveSummary(targetYear, targetMonth); // NEW: استدعاء الدالة مباشرة
+
+        res.status(200).json({ message: `تم بدء عملية تحديث الملخص المحاسبي لشهر <span class="math-inline">\{targetMonth\}/</span>{targetYear}.` });
+    } catch (err) {
+        console.error('خطأ في تشغيل تحديث الملخص المحاسبي يدوياً:', err);
+        res.status(500).json({ message: 'فشل في تشغيل تحديث الملخص المحاسبي يدوياً.' });
+    }
+});
+
 
 module.exports = router;

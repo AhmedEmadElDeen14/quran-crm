@@ -3,7 +3,8 @@ import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
-import { MdSchool, MdPeople, MdBarChart } from 'react-icons/md';
+import { MdSchool, MdPeople, MdBarChart, MdManageAccounts } from 'react-icons/md';
+
 
 function AdminDashboard() {
     const { user, logout } = useContext(AuthContext);
@@ -83,11 +84,17 @@ function AdminDashboard() {
                         <MdBarChart size={36} className="text-purple-600 dark:text-purple-400" />
                         <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">التقارير والإحصائيات</h3>
                     </header>
+                    {/* يمكنك إبقاء هذا الزر معطلاً أو إزالته إذا لم تعد بحاجة إليه */}
                     <Button variant="secondary" size="md" className="w-full justify-start mb-4 text-right" disabled>
                         تقرير شهري (قريباً)
                     </Button>
+                    {/* إضافة زر لصفحة إدارة الحسابات الجديدة */}
+                    <Button variant="secondary" size="md" className="w-full justify-start text-right mb-4" onClick={goTo('/admin/financial-transactions')}>
+                        <MdManageAccounts size={24} className="ml-2" /> إدارة الحسابات المالية
+                    </Button>
+                    {/* زر التقارير المالية الحالي (لو كان يشير لصفحة أخرى أو تريد الفصل) */}
                     <Button variant="secondary" size="md" className="w-full justify-start text-right" onClick={goTo('/admin/financial-reports')}>
-                        التقارير المالية
+                        التقارير المالية الشهرية
                     </Button>
                 </Card>
             </section>

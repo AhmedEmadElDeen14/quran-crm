@@ -6,7 +6,7 @@ const Student = require('../models/student');
 const Teacher = require('../models/teacher');
 const Session = require('../models/session');
 const mongoose = require('mongoose');
-const { protect, admin } = require('../middleware/authMiddleware');
+const { protect, admin, adminOrTeacher } = require('../middleware/authMiddleware');
 const Transaction = require('../models/transaction');
 
 // تعريف قيم الاشتراك لكل باقة وعدد الخانات (30 دقيقة) المطلوبة شهرياً
@@ -22,50 +22,13 @@ const SUBSCRIPTION_DETAILS = {
 
 // @route   GET /api/students
 // @desc    الحصول على جميع الطلاب (مع إمكانية الفلترة حسب الأرشفة والمعلم)
-// @access  Admin
-router.get('/', protect, admin, async (req, res) => {
+// @access  adminOrTeacher
+router.get('/', protect, adminOrTeacher, async (req, res) => {
     try {
         const filter = {};
         const { isArchived, teacherId } = req.query;
 
         // فلترة حسب حالة الأرشفة
-        // إذا كانت 'true' أو 'false'، نستخدمها. غير ذلك، نعتبر isArchived: false (الافتراضي: غير مؤرشف)
-        if (isArchived !== undefined) {
-            filter.isArchived = isArchived === 'true';
-        } else {
-            filter.isArchived = false; // افتراضياً جلب الطلاب غير المؤرشفين فقط
-        }
-
-        // فلترة حسب المعلم
-        if (teacherId) {
-            if (!mongoose.Types.ObjectId.isValid(teacherId)) {
-                return res.status(400).json({ message: 'معرف المعلم غير صالح للفلترة.' });
-            }
-            filter.teacherId = teacherId;
-        }
-
-        const students = await Student.find(filter).populate('teacherId', 'name');
-        res.json(students);
-    } catch (err) {
-        console.error("Error fetching students with filters:", err);
-        res.status(500).json({ message: err.message });
-    }
-});
-
-
-
-
-// @route   GET /api/students
-// @desc    الحصول على جميع الطلاب (مع إمكانية الفلترة حسب الأرشفة والمعلم)
-// @access  Admin
-router.get('/', protect, admin, async (req, res) => {
-    try {
-        const filter = {};
-        const { isArchived, teacherId } = req.query;
-
-        // فلترة حسب حالة الأرشفة
-        // إذا كانت 'true' أو 'false'، نستخدمها.
-        // إذا كانت 'all' أو غير معرفة، لا نطبق فلتر isArchived (نرجع كل الطلاب)
         if (isArchived === 'true') {
             filter.isArchived = true;
         } else if (isArchived === 'false') {
@@ -73,12 +36,22 @@ router.get('/', protect, admin, async (req, res) => {
         }
         // إذا كان isArchived === 'all' أو undefined، لا نضيف فلتر isArchived إلى الـ query، مما سيجلب كل الطلاب
 
-        // فلترة حسب المعلم
-        if (teacherId) {
-            if (!mongoose.Types.ObjectId.isValid(teacherId)) {
-                return res.status(400).json({ message: 'معرف المعلم غير صالح للفلترة.' });
+        // فلترة حسب المعلم بناءً على الدور
+        if (req.user.role === 'Teacher') { // إذا كان المستخدم معلمًا
+            // المعلمون يمكنهم رؤية طلابهم فقط
+            if (req.user.teacherProfileId) {
+                filter.teacherId = req.user.teacherProfileId;
+            } else {
+                return res.status(403).json({ message: 'Teacher profile not linked to user account.' });
             }
-            filter.teacherId = teacherId;
+        } else if (req.user.role === 'Admin') { // إذا كان المستخدم مسؤولًا
+            // المسؤولون يمكنهم رؤية جميع الطلاب أو التصفية بمعرف معلم محدد
+            if (teacherId) {
+                if (!mongoose.Types.ObjectId.isValid(teacherId)) {
+                    return res.status(400).json({ message: 'معرف المعلم غير صالح للفلترة.' });
+                }
+                filter.teacherId = teacherId;
+            }
         }
 
         const students = await Student.find(filter).populate('teacherId', 'name');
@@ -89,6 +62,34 @@ router.get('/', protect, admin, async (req, res) => {
     }
 });
 
+
+
+// @route   GET /api/students/:id
+// @desc    الحصول على طالب واحد بالـ ID
+// @access  Admin
+router.get('/:id', protect, admin, async (req, res) => { // هذا المسار للأدمن فقط
+    try {
+        console.log(`[Backend Log] Received request for student ID: ${req.params.id}`);
+
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            console.log(`[Backend Log] Invalid student ID format detected: ${req.params.id}`);
+            return res.status(400).json({ message: 'معرف الطالب غير صالح.' });
+        }
+
+        // استخدام findOne مع ObjectId لضمان البحث الصحيح
+        const student = await Student.findOne({ _id: new mongoose.Types.ObjectId(req.params.id) }).populate('teacherId', 'name');
+
+        console.log(`[Backend Log] Student.findOne({ _id: ${req.params.id} }) returned: ${student ? 'Student Found' : 'Student NOT Found (returned null)'}`);
+
+        if (!student) {
+            return res.status(404).json({ message: 'لم يتم العثور على الطالب.' });
+        }
+        res.json(student);
+    } catch (err) {
+        console.error(`[Backend ERROR] Error fetching student by ID ${req.params.id}:`, err);
+        res.status(500).json({ message: 'فشل الخادم في جلب بيانات الطالب.' });
+    }
+});
 
 // @route   POST /api/students
 // @desc    تسجيل طالب جديد
@@ -353,6 +354,8 @@ router.put('/:id', protect, admin, async (req, res) => {
         res.status(400).json({ message: err.message });
     }
 });
+
+
 
 
 // @route   POST /api/students/:id/archive
@@ -698,5 +701,32 @@ router.post('/:id/payments', protect, admin, async (req, res) => {
         res.status(500).json({ message: 'فشل في إضافة الدفعة المالية.' });
     }
 });
+
+
+// @route   GET /api/students/summary
+// @desc    الحصول على ملخص أعداد الطلاب (النشطين، المؤرشفين، إلخ)
+// @access  Admin
+router.get('/summary', protect, admin, async (req, res) => {
+    try {
+        const totalStudents = await Student.countDocuments(); // إجمالي الطلاب
+        const activeStudents = await Student.countDocuments({ isArchived: false }); // الطلاب النشطون
+        const totalArchiveStudents = await Student.countDocuments({ isArchived: true }); // الطلاب المؤرشفون (الاسم الجديد)
+        const trialStudents = await Student.countDocuments({ subscriptionType: 'حلقة تجريبية' }); // طلاب الحلقات التجريبية
+        const renewalNeededStudents = await Student.countDocuments({ isRenewalNeeded: true }); // الطلاب الذين يحتاجون للتجديد (جديد)
+
+
+        res.json({
+            totalStudents, // إجمالي الطلاب
+            activeStudents, // الطلاب النشطون
+            totalArchiveStudents, // الطلاب المؤرشفون
+            trialStudents, // طلاب الحلقات التجريبية
+            renewalNeededStudents // الطلاب الذين يحتاجون للتجديد
+        });
+    } catch (err) {
+        console.error('خطأ في جلب ملخص الطلاب:', err);
+        res.status(500).json({ message: 'فشل الخادم في جلب ملخص الطلاب.' });
+    }
+});
+
 
 module.exports = router;

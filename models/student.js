@@ -69,9 +69,13 @@ const studentSchema = new mongoose.Schema({
         default: 'نصف ساعة'
     },
     paymentDetails: {
-        status: { type: String, enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'], default: 'لم يتم الدفع' },
+        status: {
+            type: String,
+            enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'],
+            default: 'لم يتم الدفع'
+        },
         amount: { type: Number, default: 0 },
-        date: { type: Date, default: null } // تاريخ آخر دفعة
+        date: { type: Date, default: null }
     },
     sessionsCompletedThisPeriod: { // عدد الحصص المكتملة في الفترة الحالية (الشهر عادة)
         type: Number,

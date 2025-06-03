@@ -22,6 +22,8 @@ import ManageTeachersPage from './pages/ManageTeachersPage';
 import TeacherFormPage from './pages/TeacherFormPage';
 import DrawerLayout from './components/DrawerLayout';
 import FinancialReportsPage from './pages/FinancialReportsPage';
+import FinancialManagementPage from './pages/FinancialManagementPage';
+
 
 // Contexts and PrivateRoute
 import { AuthProvider, AuthContext } from './context/AuthContext';
@@ -31,6 +33,8 @@ import { ToastProvider, useToast } from './context/ToastContext'; // NEW: Toast 
 
 // Centralized helper functions (to avoid duplication and ensure consistency)
 import { formatTime12Hour, getTimeInMinutes } from './utils/timeHelpers'; // NEW: timeHelpers util
+
+
 
 // Home Component
 const Home = () => {
@@ -120,6 +124,8 @@ function App() {
 
               {/* Financial Management Routes */}
               <Route path="/admin/financial-reports" element={<PrivateRoute role="Admin"><FinancialReportsPage /></PrivateRoute>} />
+              <Route path="/admin/financial-transactions" element={<PrivateRoute role="Admin"><FinancialManagementPage /></PrivateRoute>} />
+
 
               {/* Teacher's Own Dashboard Route */}
               <Route path="/teacher/dashboard" element={<PrivateRoute role="Teacher"><TeacherDashboard /></PrivateRoute>} />

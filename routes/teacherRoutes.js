@@ -10,11 +10,11 @@ const mongoose = require('mongoose');
 
 // تعريف قيم الاشتراك (يمكن نقلها إلى ملف config مشترك إذا استخدمت في أكثر من مكان)
 const SUBSCRIPTION_DETAILS = {
-    'نصف ساعة / 4 حصص': { amount: 170, monthlySlots: 4 },
-    'نصف ساعة / 8 حصص': { amount: 300, monthlySlots: 8 },
-    'ساعة / 4 حصص': { amount: 300, monthlySlots: 8 },
-    'ساعة / 8 حصص': { amount: 600, monthlySlots: 16 },
-    'مخصص': { amount: 0, monthlySlots: 12 }, // مثلاً 6 ساعات شهرية = 12 خانة نصف ساعة
+    'نصف ساعة / 4 حصص': { amount: 80, monthlySlots: 4 },   // 4 حصص * 20 جنيه = 80 جنيه
+    'نصف ساعة / 8 حصص': { amount: 160, monthlySlots: 8 },  // 8 حصص * 20 جنيه = 160 جنيه
+    'ساعة / 4 حصص': { amount: 160, monthlySlots: 8 },      // 4 حصص * (2 * 20 جنيه) = 160 جنيه (باعتبار الساعة = 2 نصف ساعة)
+    'ساعة / 8 حصص': { amount: 320, monthlySlots: 16 },     // 8 حصص * (2 * 20 جنيه) = 320 جنيه
+    'مخصص': { amount: 0, monthlySlots: 12 },
     'حلقة تجريبية': { amount: 0, monthlySlots: 1 },
     'أخرى': { amount: 0, monthlySlots: 0 }
 };
@@ -50,7 +50,7 @@ router.get('/:id', protect, adminOrTeacher, async (req, res) => {
         const teacher = await Teacher.findById(req.params.id);
 
         // تحقق من أن المستخدم لديه صلاحية الوصول (المسؤول أو المعلم نفسه)
-        if (req.user.role === 'Teacher' && req.user.userId !== req.params.id) {
+        if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
             return res.status(403).json({ message: 'غير مصرح لك بالوصول إلى بيانات معلم آخر.' });
         }
 
@@ -75,7 +75,7 @@ router.get('/:id/available-slots', protect, adminOrTeacher, async (req, res) => 
 
         const teacher = await Teacher.findById(req.params.id).populate('availableTimeSlots.bookedBy', 'name');
 
-        if (req.user.role === 'Teacher' && req.user.userId !== req.params.id) {
+        if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== req.params.id) {
             return res.status(403).json({ message: 'غير مصرح لك بالوصول إلى مواعيد معلم آخر.' });
         }
 
@@ -265,13 +265,36 @@ router.delete('/:id', protect, admin, async (req, res) => {
 // @desc    جلب حصص المعلم لليوم المحدد (من الـ TeacherDashboard)
 // @access  Admin or Teacher (if viewing self)
 router.get('/sessions/teacher/:teacherId/today', protect, adminOrTeacher, async (req, res) => {
-    // ... (validation and permission checks) ...
     try {
+        const { teacherId } = req.params; // استخراج teacherId من بارامترات الرابط
+        const { dayOfWeek } = req.query; // استخراج dayOfWeek من query parameters
+
+        // تأكد أيضًا من وجود فحص الصلاحيات هنا لضمان أن المعلم يرى حصصه فقط
+        if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== teacherId) {
+            return res.status(403).json({ message: 'غير مصرح لك بالوصول إلى حصص معلم آخر.' });
+        }
+
+        // حساب تاريخ بداية ونهاية الأسبوع الحالي ليوم الأسبوع المحدد (لضمان جلب حصص الأسبوع الحالي فقط)
+        const today = new Date();
+        const currentDayIndex = today.getDay(); // 0 for Sunday, 5 for Friday
+        const targetDayIndex = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'].indexOf(dayOfWeek);
+
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - currentDayIndex); // بداية الأسبوع (الأحد)
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 7); // نهاية الأسبوع (الأحد القادم في 00:00)
+
         const sessions = await Session.find({
             teacherId: teacherId,
             dayOfWeek: dayOfWeek,
-            status: 'مجدولة' // فقط الحصص التي لا تزال مجدولة لهذا اليوم
-        }).populate('studentId', 'name phone subscriptionType'); // <--- هنا يتم عمل populate
+            date: { // جلب حصص الأسبوع الحالي فقط
+                $gte: startOfWeek,
+                $lt: endOfWeek
+            }
+            // تم إزالة شرط "status: 'مجدولة'" لجلب جميع الحصص
+        }).populate('studentId', 'name phone subscriptionType');
 
         res.json(sessions);
     } catch (err) {
@@ -290,7 +313,7 @@ router.get('/:id/monthly-sessions-summary', protect, adminOrTeacher, async (req,
     if (!mongoose.Types.ObjectId.isValid(teacherId)) {
         return res.status(400).json({ message: 'معرف المعلم غير صالح.' });
     }
-    if (req.user.role === 'Teacher' && req.user.userId !== teacherId) {
+    if (req.user.role === 'Teacher' && req.user.teacherProfileId.toString() !== teacherId) {
         return res.status(403).json({ message: 'غير مصرح لك بالوصول إلى ملخص حصص معلم آخر.' });
     }
 
@@ -378,7 +401,8 @@ router.put('/sessions/:sessionId/update-status', protect, adminOrTeacher, async 
             return res.status(404).json({ message: 'الجلسة غير موجودة.' });
         }
 
-        if (req.user.role === 'Teacher' && session.teacherId._id.toString() !== req.user.userId) {
+        // Corrected authorization check for teachers
+        if (req.user.role === 'Teacher' && session.teacherId._id.toString() !== req.user.teacherProfileId.toString()) {
             return res.status(403).json({ message: 'غير مصرح لك بتحديث حالة حصة معلم آخر.' });
         }
 
@@ -390,8 +414,19 @@ router.put('/sessions/:sessionId/update-status', protect, adminOrTeacher, async 
         }
 
         const oldStatus = session.status;
-        let sessionsChange = 0;
-        let absencesChange = 0;
+        let sessionsChange = 0; // للحصص العادية
+        let absencesChange = 0; // للغيابات العادية
+        let trialSessionsChange = 0; // NEW: للحصص التجريبية
+        let earningsChange = 0; // NEW: لتتبع التغيير في أرباح المعلم
+
+        // Function to get earning value for a given status
+        // الحلقات التجريبية مجانية ولا يحاسب عليها المعلم، لذا نضع 0 لها
+        const getEarningValue = (status, isTrialSession) => { // NEW: أضف isTrialSession كـ parameter
+            if (isTrialSession) return 0; // للحلقات التجريبية دائماً 0 أرباح
+            if (status === 'حضَر') return 20; // 20 جنيه للحضور العادي
+            if (status === 'غاب') return 10; // 10 جنيه للغياب العادي
+            return 0; // لـ 'مجدولة' أو 'طلب تأجيل' لا يوجد ربح
+        };
 
         // الحصول على بداية الشهر الحالي للطالب (بناءً على آخر تجديد/تسجيل)
         const studentLastRenewalDate = student.lastRenewalDate || student.createdAt;
@@ -402,7 +437,6 @@ router.put('/sessions/:sessionId/update-status', protect, adminOrTeacher, async 
         const sessionMonthStart = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), 1);
 
         // التأكد من أن التحديث يؤثر على الفترة الحالية للطالب
-        // يجب أن يكون تاريخ الحصة في نفس الفترة التي يتم حساب التجديد لها (الشهر الذي بدأت فيه فترة التجديد للطالب)
         // هذا المنطق يضمن أننا نعدل العدادات فقط للفترة الزمنية ذات الصلة بالتجديد
         if (sessionMonthStart.getTime() === studentPeriodStart.getTime()) {
             if (oldStatus === 'حضَر' && status !== 'حضَر') {
@@ -421,27 +455,52 @@ router.put('/sessions/:sessionId/update-status', protect, adminOrTeacher, async 
             student.sessionsCompletedThisPeriod = Math.max(0, student.sessionsCompletedThisPeriod + sessionsChange);
             student.absencesThisPeriod = Math.max(0, student.absencesThisPeriod + absencesChange);
         } else {
-            console.log(`Session ${session._id} from a different period \(${sessionMonthStart.toISOString()}) than student's current period (${studentPeriodStart.toISOString()}). Not updating current period counters.`);
+            console.log(`Session <span class="math-inline">\{session\.\_id\} from a different period \(</span>{sessionMonthStart.toISOString()}) than student's current period (${studentPeriodStart.toISOString()}). Not updating current period counters.`);
         }
 
-        // تحديث إجمالي حصص المعلم لهذا الشهر ( بغض النظر عن فترة تجديد الطالب)
-        // هذا يعكس أداء المعلم في الشهر الحالي
+        // تحديث إجمالي حصص المعلم لهذا الشهر (بغض النظر عن فترة تجديد الطالب)
+        // وهنا سنضيف حساب أرباح المعلم بناءً على حالة الحصة الجديدة والقديمة
         const currentMonthForTeacher = new Date();
         const teacherMonthStart = new Date(currentMonthForTeacher.getFullYear(), currentMonthForTeacher.getMonth(), 1);
 
+        // تحقق من أن تاريخ الحصة يقع في الشهر الحالي للمعلم (للتأثير على earnings)
         if (sessionMonthStart.getTime() === teacherMonthStart.getTime()) {
-            if (oldStatus === 'حضَر' && status !== 'حضَر') {
-                teacher.currentMonthSessions = Math.max(0, (teacher.currentMonthSessions || 0) - 1);
-            } else if (oldStatus !== 'حضَر' && status === 'حضَر') {
-                teacher.currentMonthSessions = (teacher.currentMonthSessions || 0) + 1;
-            } S
+            // حساب التغيير في الأرباح
+            const oldEarning = getEarningValue(oldStatus, session.isTrial); // NEW: تمرير session.isTrial
+            const newEarning = getEarningValue(status, session.isTrial);   // NEW: تمرير session.isTrial
+
+            earningsChange = newEarning - oldEarning; // حساب صافي التغيير في الأرباح
+
+            // تحديث عدد الحصص المكتملة أو الغيابات للمعلم لهذا الشهر
+            if (session.isTrial) { // NEW: إذا كانت حصة تجريبية
+                if (oldStatus === 'حضَر' && status !== 'حضَر') {
+                    trialSessionsChange = -1; // نقص من عداد التجريبي
+                } else if (oldStatus !== 'حضَر' && status === 'حضَر') {
+                    trialSessionsChange = 1; // زيادة في عداد التجريبي
+                }
+                teacher.currentMonthTrialSessions = Math.max(0, (teacher.currentMonthTrialSessions || 0) + trialSessionsChange);
+            } else { // NEW: إذا كانت حصة عادية (غير تجريبية)
+                if (oldStatus === 'حضَر' && status !== 'حضَر') {
+                    teacher.currentMonthSessions = Math.max(0, (teacher.currentMonthSessions || 0) - 1);
+                } else if (oldStatus !== 'حضَر' && status === 'حضَر') {
+                    teacher.currentMonthSessions = (teacher.currentMonthSessions || 0) + 1;
+                }
+
+                if (oldStatus === 'غاب' && status !== 'غاب') {
+                    teacher.currentMonthAbsences = Math.max(0, (teacher.currentMonthAbsences || 0) - 1);
+                } else if (oldStatus !== 'غاب' && status === 'غاب') {
+                    teacher.currentMonthAbsences = (teacher.currentMonthAbsences || 0) + 1;
+                }
+            }
+
+            // تحديث أرباح المعلم التقديرية لهذا الشهر
+            teacher.estimatedMonthlyEarnings = (teacher.estimatedMonthlyEarnings || 0) + earningsChange;
+            teacher.estimatedMonthlyEarnings = Math.max(0, teacher.estimatedMonthlyEarnings); // لا يمكن أن تكون الأرباح بالسالب
         } else {
-            console.log(`Session ${session._id} not in current teacher month \(${teacherMonthStart.toISOString()}). Not updating teacher's currentMonthSessions.`);
+            console.log(`Session <span class="math-inline">\{session\.\_id\} not in current teacher month \(</span>{teacherMonthStart.toISOString()}). Not updating teacher's currentMonthSessions, absences, or earnings.`);
         }
 
-
         // تحديث حالة التجديد للطالب إذا وصل لعدد معين من الحصص
-        // يعتمد على `getRequiredMonthlySlots` من نموذج الطالب
         const requiredSlots = student.getRequiredMonthlySlots();
         if (requiredSlots > 0 && student.subscriptionType !== 'مخصص') {
             if (student.sessionsCompletedThisPeriod >= requiredSlots) {
@@ -450,14 +509,12 @@ router.put('/sessions/:sessionId/update-status', protect, adminOrTeacher, async 
                 student.isRenewalNeeded = false;
             }
         }
-        // بالنسبة للاشتراك المخصص، يمكن أن يكون التجديد يدوياً أو بعد عدد معين من الحصص،
-        // أو يمكن إضافة منطق معقد لحسابه
 
         // تحديث الحصة نفسها
         session.status = status;
         session.report = report || null;
         session.updatedAt = new Date();
-        session.countsTowardsBalance = (status !== 'طلب تأجيل'); // الحصص "طلب تأجيل" لا تحتسب
+        session.countsTowardsBalance = (status !== 'طلب تأجيل');
 
         await student.save();
         await teacher.save();

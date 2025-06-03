@@ -8,10 +8,12 @@ import { MdPersonAdd, MdEdit, MdListAlt, MdCalendarToday } from 'react-icons/md'
 
 function StudentManagement() {
     const [summary, setSummary] = useState({
+        totalStudents: 0, // إجمالي الطلاب (الجديد في الواجهة الأمامية)
         totalActiveStudents: 0,
         trialStudents: 0,
-        fullSubscriptionStudents: 0,
-        renewalNeededStudents: 0,
+        totalArchiveStudents: 0, // الطلاب المؤرشفون (الاسم الجديد)
+        fullSubscriptionStudents: 0, // سيظل محسوباً في الواجهة الأمامية
+        renewalNeededStudents: 0, // الطلاب الذين يحتاجون للتجديد (الجديد في الواجهة الأمامية)
     });
     const [loadingSummary, setLoadingSummary] = useState(true);
     const [error, setError] = useState(null);
@@ -25,13 +27,15 @@ function StudentManagement() {
                 headers: { Authorization: `Bearer ${user.token}` },
             };
 
-            const { data } = await axios.get('http://localhost:5000/api/students/summary', config);
+            const { data } = await axios.get('/api/students/summary', config);
 
             setSummary({
-                totalActiveStudents: data.totalActiveStudents,
+                totalStudents: data.totalStudents,
+                totalActiveStudents: data.activeStudents,
                 trialStudents: data.trialStudents,
-                fullSubscriptionStudents: data.fullSubscriptionStudents,
-                renewalNeededStudents: data.renewalNeededStudentsCount,
+                totalArchiveStudents: data.totalArchiveStudents,
+                renewalNeededStudents: data.renewalNeededStudents,
+                fullSubscriptionStudents: data.activeStudents - data.trialStudents,
             });
             setLoadingSummary(false);
         } catch (err) {
@@ -64,21 +68,36 @@ function StudentManagement() {
                     </p>
                 ) : (
                     <>
+                        <Card className="text-center shadow-lg border-gray-500 border-2">
+                            <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">إجمالي الطلاب (الكل)</h3>
+                            <p className="text-4xl font-bold text-gray-600 dark:text-gray-400">{summary.totalStudents}</p>
+                        </Card>
+
+                        {/* بطاقة: إجمالي الطلاب النشطين */}
                         <Card className="text-center shadow-lg border-indigo-500 border-2">
                             <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">إجمالي الطلاب النشطين</h3>
                             <p className="text-4xl font-bold text-indigo-600 dark:text-indigo-400">{summary.totalActiveStudents}</p>
                         </Card>
 
+                        {/* بطاقة: طلاب الحلقات التجريبية */}
                         <Card className="text-center shadow-lg border-blue-500 border-2">
                             <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">طلاب الحلقات التجريبية</h3>
                             <p className="text-4xl font-bold text-blue-600 dark:text-blue-400">{summary.trialStudents}</p>
                         </Card>
 
+                        {/* بطاقة: طلاب الاشتراكات الكاملة */}
                         <Card className="text-center shadow-lg border-green-500 border-2">
                             <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">طلاب الاشتراكات الكاملة</h3>
                             <p className="text-4xl font-bold text-green-600 dark:text-green-400">{summary.fullSubscriptionStudents}</p>
                         </Card>
 
+                        {/* بطاقة: طلاب مؤرشفون */}
+                        <Card className="text-center shadow-lg border-orange-500 border-2">
+                            <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">طلاب مؤرشفون</h3>
+                            <p className="text-4xl font-bold text-orange-600 dark:text-orange-400">{summary.totalArchiveStudents}</p>
+                        </Card>
+
+                        {/* بطاقة: طلاب يحتاجون للتجديد */}
                         <Card className="text-center shadow-lg border-red-500 border-2">
                             <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-3">طلاب يحتاجون للتجديد</h3>
                             <p className="text-4xl font-bold text-red-600 dark:text-red-400">{summary.renewalNeededStudents}</p>
@@ -116,5 +135,7 @@ function StudentManagement() {
         </div>
     );
 }
+
+
 
 export default StudentManagement;

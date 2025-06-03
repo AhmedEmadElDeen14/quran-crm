@@ -58,8 +58,8 @@ const transactionSchema = new mongoose.Schema({
     // حالة الدفعة (للمدفوعات التي قد تكون معلقة أو مجزأة)
     status: {
         type: String,
-        enum: ['paid', 'pending', 'partial', 'cancelled'],
-        default: 'paid'
+        enum: ['تم الدفع', 'لم يتم الدفع', 'تم دفع جزء', 'حلقة تجريبية', 'لم يشترك', 'مدفوع'], // يجب أن تطابق قيم Student model تماماً
+        default: 'تم الدفع' // تعديل القيمة الافتراضية أيضاً لتكون متناسقة
     },
     // إذا كانت الحركة مرتبطة بحصة معينة (مثلاً دفع أجر حصة إضافية)
     relatedSessionId: {

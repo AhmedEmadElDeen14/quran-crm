@@ -137,4 +137,80 @@ const startAccountingScheduler = () => {
     // updateMonthlyAccountingSummary(currentYear, currentMonth); // لتشغيلها للشهر الحالي
 };
 
-module.exports = { startAccountingScheduler, updateMonthlyAccountingSummary };
+
+// دالة مساعدة لحساب وحفظ الملخص الشهري
+async function calculateAndSaveSummary(year, month) { // قم بتصدير هذه الدالة
+    const monthString = `${year}-${String(month).padStart(2, '0')}`;
+    console.log(`[CRON] Starting manual/scheduled accounting summary for ${monthString}...`);
+    try {
+        const startDate = new Date(year, month - 1, 1); // الشهر في Date هو 0-11
+        const endDate = new Date(year, month, 0);       // اليوم الأخير من الشهر
+
+        const transactionsInMonth = await Transaction.find({
+            date: { $gte: startDate, $lte: endDate }
+        });
+
+        let totalRevenue = 0;
+        let totalExpenses = 0;
+        let totalSalariesPaid = 0;
+        let charityExpenses = 0;
+
+        transactionsInMonth.forEach(transaction => {
+            if (transaction.type === 'subscription_payment' || transaction.type === 'other_income') {
+                totalRevenue += transaction.amount;
+            } else if (transaction.type === 'salary_payment') {
+                totalSalariesPaid += transaction.amount;
+            } else if (transaction.type === 'charity_expense') {
+                charityExpenses += transaction.amount;
+            } else if (transaction.type === 'system_expense' || transaction.type === 'advertisement_expense' || transaction.type === 'other_expense') {
+                totalExpenses += transaction.amount;
+            }
+        });
+
+        const netProfit = totalRevenue - totalExpenses - totalSalariesPaid - charityExpenses;
+
+        await AccountingSummary.findOneAndUpdate(
+            { month: monthString },
+            {
+                totalRevenue,
+                totalExpenses,
+                totalSalariesPaid,
+                charityExpenses,
+                netProfit
+            },
+            { upsert: true, new: true }
+        );
+        console.log(`[CRON] Accounting summary for ${monthString} completed.`);
+    } catch (error) {
+        console.error(`[CRON ERROR] Failed to generate accounting summary for ${monthString}:`, error);
+        throw error; // أعد رمي الخطأ للتعامل معه في المسار API
+    }
+}
+
+const scheduleMonthlyAccountingSummary = () => {
+    // ... (الجزء الخاص بجدولة الـ cron job الأصلي - لا تقم بتغييره هنا) ...
+    cron.schedule('30 0 1 * *', async () => {
+        const now = new Date();
+        let summaryMonth = now.getMonth(); // فهرس الشهر الحالي (0-11)
+        let summaryYear = now.getFullYear();
+
+        if (summaryMonth === 0) {
+            summaryMonth = 12; // ديسمبر
+            summaryYear--;
+        }
+        calculateAndSaveSummary(summaryYear, now.getMonth()); // `now.getMonth()` هو الشهر السابق للفهرسة 0-11
+        // إذا كانت الدالة تتوقع 1-12: `now.getMonth() + 1`
+        // بما أنها تتوقع 1-12، فالأفضل أن نمرر الشهر الذي تم تجميعه بالضبط
+        // الـ cron job يجمع للشهر السابق، لذا month -1
+        // `(now.getMonth() - 1 + 12) % 12 + 1`
+        calculateAndSaveSummary(
+            summaryYear,
+            (now.getMonth() - 1 + 12) % 12 + 1 // يمرر الشهر السابق (1-12)
+        );
+    });
+
+};
+
+
+
+module.exports = { startAccountingScheduler, updateMonthlyAccountingSummary, calculateAndSaveSummary };

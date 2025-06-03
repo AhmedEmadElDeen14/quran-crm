@@ -62,7 +62,7 @@ function TeacherDashboard() {
             const config = { headers: { Authorization: `Bearer ${user.token}` } };
 
             // 1. Fetch teacher details
-            const teacherRes = await axios.get(`/api/teacher/${teacherIdToFetch}`, config);
+            const teacherRes = await axios.get(`/api/teachers/${teacherIdToFetch}`, config);
             setTeacher(teacherRes.data);
 
             // 2. Fetch students assigned to this teacher
@@ -83,8 +83,18 @@ function TeacherDashboard() {
 
             // 3. Fetch today's sessions for this teacher
             const dayOfWeek = getCurrentDayOfWeekArabic();
-            const sessionsRes = await axios.get(`/api/sessions/teacher/${teacherIdToFetch}/today?dayOfWeek=${encodeURIComponent(dayOfWeek)}`, config);
-            setSessionsToday(sessionsRes.data);
+            const sessionsRes = await axios.get(`/api/teachers/sessions/teacher/${teacherIdToFetch}/today?dayOfWeek=${encodeURIComponent(dayOfWeek)}`, config);
+            // فرز الحصص: "مجدولة" أولاً، ثم الحالات الأخرى
+            const sortedSessions = sessionsRes.data.sort((a, b) => {
+                const statusOrder = { 'مجدولة': 1, 'حضَر': 2, 'غاب': 3, 'طلب تأجيل': 4 };
+                // فرز حسب الحالة أولاً، ثم حسب الوقت لترتيب الحصص المجدولة زمنياً
+                if (statusOrder[a.status] !== statusOrder[b.status]) {
+                    return statusOrder[a.status] - statusOrder[b.status];
+                }
+                // إذا كانت نفس الحالة، فرز حسب الوقت
+                return new Date('1970/01/01 ' + a.timeSlot.split(' - ')[0]) - new Date('1970/01/01 ' + b.timeSlot.split(' - ')[0]);
+            });
+            setSessionsToday(sortedSessions);
 
             // 4. Fetch actual monthly completed sessions for the chart
             const monthlyStatsRes = await axios.get(`/api/teachers/${teacherIdToFetch}/monthly-sessions-summary`, config);
@@ -159,8 +169,9 @@ function TeacherDashboard() {
     const fullSubscriptionStudents = students.filter(s => s.subscriptionType !== 'حلقة تجريبية' && s.subscriptionType !== 'أخرى').length;
     const renewalNeededStudents = students.filter(s => s.isRenewalNeeded).length;
 
-    const notifications = students.filter(s => s.isRenewalNeeded || (s.remainingSlots !== undefined && s.remainingSlots <= 2 && s.remainingSlots > 0)).map(s => {
-        if (s.isRenewalNeeded) {
+    const notifications = students.filter(s => !s.isTrial && (s.isRenewalNeeded || (s.remainingSlots !== undefined && s.remainingSlots <= 2 && s.remainingSlots > 0))).map(s => {
+        // تنبيه التجديد يظهر فقط إذا كان المستخدم مسؤولاً (Admin)
+        if (s.isRenewalNeeded && isAdminView) { // <--- تم إضافة الشرط هنا
             return {
                 id: s._id,
                 type: 'warning',
@@ -177,7 +188,6 @@ function TeacherDashboard() {
         }
         return null;
     }).filter(Boolean);
-
 
     if (loading) {
         return (
@@ -224,7 +234,7 @@ function TeacherDashboard() {
                 <SummaryCard title="طلاب بحاجة لتجديد" value={renewalNeededStudents} type="warning" />
                 <SummaryCard title="حصص اليوم" value={sessionsToday.length} type="info" />
                 <SummaryCard title="إجمالي حصص الشهر" value={teacher.currentMonthSessions || 0} type="total" />
-                <SummaryCard title="الأرباح التقديرية هذا الشهر" value={`${(teacher.currentMonthSessions * 15).toFixed(2)} جنيه`} type="success" />
+                <SummaryCard title="الأرباح التقديرية هذا الشهر" value={`${(teacher.estimatedMonthlyEarnings || 0).toFixed(2)} جنيه`} type="success" />
             </div>
 
             {/* Notifications */}
@@ -267,8 +277,7 @@ function TeacherDashboard() {
                             </thead>
                             <tbody>
                                 {sessionsToday.map(session => (
-                                    <tr key={session._id} className="odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700">
-                                        <td className="text-center">{session.studentId?.name || 'طالب محذوف'}</td>
+                                    <tr key={session._id} className={session.status !== 'مجدولة' ? 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400' : 'odd:bg-white even:bg-gray-50 dark:odd:bg-gray-800 dark:even:bg-gray-700'}>                                        <td className="text-center">{session.studentId?.name || 'طالب محذوف'}</td>
                                         <td className="text-center">{formatTime12Hour(session.timeSlot.split(' - ')[0])}</td>
                                         <td className="text-center">{session.status}</td>
                                         <td className="text-center">{session.isTrial ? 'تجريبية' : 'عادية'}</td>

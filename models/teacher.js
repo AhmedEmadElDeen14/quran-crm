@@ -24,6 +24,9 @@ const teacherSchema = new mongoose.Schema({
         trim: true
     },
     currentMonthSessions: { type: Number, default: 0 },
+    currentMonthAbsences: { type: Number, default: 0 },
+    currentMonthTrialSessions: { type: Number, default: 0 },
+    estimatedMonthlyEarnings: { type: Number, default: 0 },
     specialization: {
         type: String,
         default: ''

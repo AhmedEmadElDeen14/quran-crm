@@ -2,6 +2,7 @@
 
 const cron = require('node-cron');
 const Student = require('../models/student');
+const Teacher = require('../models/teacher');
 const SUBSCRIPTION_DETAILS = require('../routes/studentRoutes').SUBSCRIPTION_DETAILS; // لتعريف SUBSCRIPTION_DETAILS
 
 
@@ -15,7 +16,11 @@ const resetMonthlySessions = async () => {
         // (أو لجميع الطلاب إذا أردت التأكد من إعادة تعيين الكل)
         await Student.updateMany(
             { isArchived: false },
-            { $set: { sessionsCompletedThisPeriod: 0, absencesThisPeriod: 0, isRenewalNeeded: false } } // <--- أضف absencesThisPeriod: 0
+            { $set: { sessionsCompletedThisPeriod: 0, absencesThisPeriod: 0, isRenewalNeeded: false } }
+        );
+        await Teacher.updateMany(
+            {},
+            { $set: { currentMonthSessions: 0, currentMonthAbsences: 0, currentMonthTrialSessions: 0, estimatedMonthlyEarnings: 0 } }
         );
         console.log('All active students monthly session counts and renewal flags reset.');
 

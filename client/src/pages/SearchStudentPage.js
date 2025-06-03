@@ -37,7 +37,8 @@ function SearchStudentPage() {
             // Fetch all active students
             const activeStudentsRes = await axios.get('http://localhost:5000/api/students', config);
             // Fetch all archived students
-            const archivedStudentsRes = await axios.get('http://localhost:5000/api/students/archived', config);
+            const archivedStudentsRes = await axios.get('http://localhost:5000/api/students?isArchived=true', config);
+
 
             const allStudents = [...activeStudentsRes.data, ...archivedStudentsRes.data];
             const foundStudent = allStudents.find(s => s.phone === searchPhone);
